@@ -4,12 +4,21 @@ import { parseHeader } from './parsers/headerParser';
 import { loadShardedModel, isShardedModel } from './parsers/shardedModel';
 import { detectLoraAdapters, parseAdapterConfig } from './parsers/loraDetector';
 import { buildArchitectureTree } from './parsers/treeBuilder';
+import { alignArchitectures } from './parsers/alignment';
 import { WorkerPool } from './workers/workerPool';
 import { MessageHost } from './protocol/messageHost';
 import { PROTOCOL_VERSION } from './types/messages';
 
 let workerPool: WorkerPool | undefined;
 let currentPanel: vscode.WebviewPanel | undefined;
+let currentMessageHost: MessageHost | undefined;
+
+let currentModelA: {
+  filePath: string;
+  tree: import('./types/tree').ArchitectureNode;
+  loraMap: import('./types/lora').LoraAdapterMap;
+  tensors: Record<string, import('./types/safetensors').TensorInfo>;
+} | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
   workerPool = new WorkerPool(2);
@@ -49,7 +58,11 @@ export function activate(context: vscode.ExtensionContext) {
       });
 
       if (!uris || uris.length === 0) return;
-      // Comparison loading will be handled in later requirements
+      if (currentMessageHost && currentModelA) {
+        await loadAndCompareModel(uris[0].fsPath, currentMessageHost);
+      } else {
+        vscode.window.showErrorMessage('Model A is not fully loaded yet.');
+      }
     },
   );
 
@@ -89,12 +102,15 @@ async function openModel(filePath: string, context: vscode.ExtensionContext) {
 
     currentPanel.onDidDispose(() => {
       currentPanel = undefined;
+      currentMessageHost = undefined;
+      currentModelA = undefined;
       messageHost.dispose();
     });
   }
 
   currentPanel.webview.html = getWebviewContent(currentPanel.webview, context);
   messageHost.attach(currentPanel);
+  currentMessageHost = messageHost;
 
   // Register handlers for incoming messages
   messageHost.onMessage('loadModel', async (msg) => {
@@ -146,6 +162,8 @@ async function loadAndSendModel(filePath: string, messageHost: MessageHost) {
 
     const tree = buildArchitectureTree(tensors, loraMap);
 
+    currentModelA = { filePath, tree, loraMap, tensors };
+
     messageHost.postMessage({
       type: 'modelLoaded',
       protocolVersion: PROTOCOL_VERSION,
@@ -160,6 +178,72 @@ async function loadAndSendModel(filePath: string, messageHost: MessageHost) {
       type: 'error',
       protocolVersion: PROTOCOL_VERSION,
       message: `Failed to load model: ${message}`,
+      code: 'LOAD_ERROR',
+    });
+  }
+}
+
+async function loadAndCompareModel(filePath: string, messageHost: MessageHost) {
+  if (!currentModelA) {
+    return;
+  }
+
+  try {
+    messageHost.postMessage({
+      type: 'progress',
+      protocolVersion: PROTOCOL_VERSION,
+      taskId: 'load-compare',
+      label: 'Parsing Model B header',
+      percent: 10,
+    });
+
+    const sharded = await isShardedModel(filePath);
+    let tensors: Record<string, import('./types/safetensors').TensorInfo>;
+
+    if (sharded) {
+      const unified = await loadShardedModel(filePath);
+      tensors = unified.tensors;
+    } else {
+      const header = await parseHeader(filePath);
+      tensors = header.tensors;
+    }
+
+    messageHost.postMessage({
+      type: 'progress',
+      protocolVersion: PROTOCOL_VERSION,
+      taskId: 'load-compare',
+      label: 'Detecting Model B LoRA adapters',
+      percent: 50,
+    });
+
+    const adapterConfig = await parseAdapterConfig(filePath);
+    const loraMap = detectLoraAdapters(tensors, adapterConfig);
+
+    messageHost.postMessage({
+      type: 'progress',
+      protocolVersion: PROTOCOL_VERSION,
+      taskId: 'load-compare',
+      label: 'Aligning architectures',
+      percent: 75,
+    });
+
+    const treeB = buildArchitectureTree(tensors, loraMap);
+    const alignedComponents = alignArchitectures(currentModelA.tree, treeB);
+
+    messageHost.postMessage({
+      type: 'comparisonResult',
+      protocolVersion: PROTOCOL_VERSION,
+      alignedComponents,
+      treeB,
+      loraMapB: loraMap,
+      filePathB: filePath
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    messageHost.postMessage({
+      type: 'error',
+      protocolVersion: PROTOCOL_VERSION,
+      message: `Failed to load comparison model: ${message}`,
       code: 'LOAD_ERROR',
     });
   }

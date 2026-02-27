@@ -17,6 +17,11 @@ taskHandlers.set('ping', () => ({ pong: true }));
 
 taskHandlers.set('echo', (payload) => payload);
 
+taskHandlers.set('computeDiff', async (payload: unknown) => {
+  const { computeDiff } = await import('./diffComputation');
+  return computeDiff(payload as any);
+});
+
 parentPort?.on('message', async (task: WorkerTask) => {
   const handler = taskHandlers.get(task.taskType);
   if (!handler) {

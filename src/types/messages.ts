@@ -28,6 +28,9 @@ export interface ComparisonResultMessage {
   type: 'comparisonResult';
   protocolVersion: number;
   alignedComponents: AlignedComponent[];
+  treeB: ArchitectureNode;
+  loraMapB: LoraAdapterMap;
+  filePathB: string;
 }
 
 export interface AlignedComponent {

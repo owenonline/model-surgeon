@@ -10,11 +10,27 @@ export function CustomNode({ data, selected }: any) {
   const isDimmed: boolean = data.isDimmed;
 
   let borderColor = '#666';
+  let borderStyle = 'solid';
   if (selected) borderColor = '#007acc';
   if (isHighlighted) borderColor = '#f0a30a';
-  if (hasLora) borderColor = '#89d185';
+  if (hasLora && !data.comparisonStatus) borderColor = '#89d185';
 
-  const opacity = isDimmed ? 0.3 : 1;
+  const comparisonStatus = data.comparisonStatus;
+  if (comparisonStatus) {
+    if (comparisonStatus.status === 'onlyA' || comparisonStatus.status === 'onlyB') {
+      borderStyle = 'dashed';
+      borderColor = '#888';
+    } else if (data.diffMetrics) {
+      // gradient from green (sim ~ 1.0) to red (sim < 0.5)
+      const sim = data.diffMetrics.cosineSimilarity;
+      if (sim > 0.99) borderColor = '#28a745'; // green
+      else if (sim > 0.8) borderColor = '#ffc107'; // yellow
+      else borderColor = '#dc3545'; // red
+    }
+  }
+
+  const isAbsent = comparisonStatus && (comparisonStatus.status === 'onlyA' || comparisonStatus.status === 'onlyB') && data.modelId !== comparisonStatus.status.replace('only', '');
+  const opacity = isDimmed || isAbsent ? 0.3 : 1;
 
   if (!isExpanded || node.type === 'parameter' || node.children.length === 0) {
     return (
@@ -22,7 +38,7 @@ export function CustomNode({ data, selected }: any) {
         style={{
           width: '100%',
           height: '100%',
-          border: `2px solid ${borderColor}`,
+          border: `2px ${borderStyle} ${borderColor}`,
           borderRadius: '4px',
           padding: '8px',
           backgroundColor: 'var(--vscode-editor-background)',
@@ -33,8 +49,9 @@ export function CustomNode({ data, selected }: any) {
         }}
       >
         <Handle type="target" position={Position.Top} style={{ visibility: 'hidden' }} />
-        <div style={{ fontWeight: 'bold', fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {node.name}
+        <div style={{ fontWeight: 'bold', fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', justifyContent: 'space-between' }}>
+          <span>{node.name}</span>
+          {comparisonStatus?.shapeMismatch && <span title="Shape Mismatch">⚠️</span>}
         </div>
         {node.type === 'parameter' && node.tensorInfo && (
           <div style={{ fontSize: '10px', color: 'var(--vscode-descriptionForeground)' }}>

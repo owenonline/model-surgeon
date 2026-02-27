@@ -1,10 +1,16 @@
 import React from 'react';
 import { ArchitectureNode } from '../../types/tree';
 import { LoraAdapterMap } from '../../types/lora';
+import { AlignedComponent } from '../../types/messages';
 
 interface DetailPanelProps {
-  node: ArchitectureNode | null;
+  data: any; // The node data from React Flow
   loraMap: LoraAdapterMap;
+  comparison?: {
+    treeB: ArchitectureNode;
+    loraMapB: LoraAdapterMap;
+    alignedComponents: AlignedComponent[];
+  };
   onClose: () => void;
   onLoadStats?: (node: ArchitectureNode) => void;
 }
@@ -29,8 +35,13 @@ function getTensorSize(shape: number[], dtype: string): number {
   return elements * bytesPerElement;
 }
 
-export function DetailPanel({ node, loraMap, onClose, onLoadStats }: DetailPanelProps) {
-  if (!node) return null;
+export function DetailPanel({ data, loraMap, comparison, onClose, onLoadStats }: DetailPanelProps) {
+  if (!data || !data.node) return null;
+
+  const node: ArchitectureNode = data.node;
+  const comparisonStatus = data.comparisonStatus;
+  const diffMetrics = data.diffMetrics;
+  const modelId = data.modelId;
 
   return (
     <div style={{
@@ -45,7 +56,7 @@ export function DetailPanel({ node, loraMap, onClose, onLoadStats }: DetailPanel
       overflowY: 'auto'
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <h3 style={{ margin: 0, fontSize: '14px', wordBreak: 'break-all' }}>Tensor Details</h3>
+        <h3 style={{ margin: 0, fontSize: '14px', wordBreak: 'break-all' }}>Tensor Details {modelId ? `(Model ${modelId})` : ''}</h3>
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--vscode-icon-foreground)', cursor: 'pointer' }}>✕</button>
       </div>
 
@@ -53,6 +64,13 @@ export function DetailPanel({ node, loraMap, onClose, onLoadStats }: DetailPanel
         <strong>Name:</strong>
         <div style={{ wordBreak: 'break-all', fontFamily: 'monospace', fontSize: '12px' }}>{node.fullPath}</div>
       </div>
+
+      {comparisonStatus && (
+        <div style={{ marginBottom: '16px', padding: '8px', backgroundColor: 'var(--vscode-editor-background)', borderRadius: '4px' }}>
+          <strong>Comparison Status:</strong> {comparisonStatus.status}
+          {comparisonStatus.shapeMismatch && <div style={{ color: '#f0a30a' }}>⚠️ Shape Mismatch</div>}
+        </div>
+      )}
 
       {node.tensorInfo ? (
         <>
@@ -80,27 +98,31 @@ export function DetailPanel({ node, loraMap, onClose, onLoadStats }: DetailPanel
         <div style={{ marginBottom: '16px', fontStyle: 'italic' }}>Not a leaf tensor</div>
       )}
 
-      {node.adapters && Object.keys(node.adapters).length > 0 && (
+      {diffMetrics && (
+        <div style={{ marginBottom: '16px', padding: '8px', backgroundColor: 'var(--vscode-editor-background)', borderRadius: '4px' }}>
+          <h4 style={{ margin: '0 0 8px 0' }}>Diff Metrics</h4>
+          <div style={{ marginBottom: '4px' }}>
+            <strong>Cosine Sim:</strong> {(diffMetrics.cosineSimilarity * 100).toFixed(2)}%
+            <div style={{ width: '100%', height: '4px', backgroundColor: '#333', marginTop: '2px' }}>
+              <div style={{ width: `${Math.max(0, diffMetrics.cosineSimilarity * 100)}%`, height: '100%', backgroundColor: diffMetrics.cosineSimilarity > 0.99 ? '#28a745' : '#f0a30a' }} />
+            </div>
+          </div>
+          <div><strong>L2 Norm Diff:</strong> {diffMetrics.l2NormDiff.toExponential(2)}</div>
+          <div><strong>Max Abs Diff:</strong> {diffMetrics.maxAbsDiff.toExponential(2)}</div>
+          <div><strong>Mean Abs Diff:</strong> {diffMetrics.meanAbsDiff.toExponential(2)}</div>
+        </div>
+      )}
+
+      {data.loraAdapters && data.loraAdapters.length > 0 && (
         <div>
           <h4 style={{ margin: '0 0 8px 0' }}>LoRA Adapters</h4>
-          {Object.values(node.adapters).map((adapter, i) => (
+          {data.loraAdapters.map((adapter: any, i: number) => (
             <div key={i} style={{ backgroundColor: 'var(--vscode-editor-background)', padding: '8px', borderRadius: '4px', marginBottom: '8px' }}>
               <div><strong>Rank:</strong> {adapter.r}</div>
               <div><strong>Alpha:</strong> {adapter.alpha}</div>
               <div><strong>Scale:</strong> {(adapter.alpha / adapter.r).toFixed(2)}</div>
             </div>
           ))}
-        </div>
-      )}
-      
-      {!node.adapters && loraMap[node.fullPath] && (
-        <div>
-          <h4 style={{ margin: '0 0 8px 0' }}>LoRA Adapter</h4>
-          <div style={{ backgroundColor: 'var(--vscode-editor-background)', padding: '8px', borderRadius: '4px', marginBottom: '8px' }}>
-            <div><strong>Rank:</strong> {loraMap[node.fullPath].r}</div>
-            <div><strong>Alpha:</strong> {loraMap[node.fullPath].alpha}</div>
-            <div><strong>Scale:</strong> {(loraMap[node.fullPath].alpha / loraMap[node.fullPath].r).toFixed(2)}</div>
-          </div>
         </div>
       )}
     </div>

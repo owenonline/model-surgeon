@@ -7,6 +7,11 @@ import { ModelGraph } from './components/ModelGraph';
 export function App() {
   const [tree, setTree] = useState<ArchitectureNode | null>(null);
   const [loraMap, setLoraMap] = useState<LoraAdapterMap>({});
+  const [comparison, setComparison] = useState<{
+    treeB: ArchitectureNode;
+    loraMapB: LoraAdapterMap;
+    alignedComponents: import('../types/messages').AlignedComponent[];
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<{ label: string; percent: number } | null>(null);
@@ -25,8 +30,14 @@ export function App() {
     progress: (msg) => {
       setProgress({ label: msg.label, percent: msg.percent });
     },
-    comparisonResult: () => {
+    comparisonResult: (msg) => {
+      setComparison({
+        treeB: msg.treeB,
+        loraMapB: msg.loraMapB,
+        alignedComponents: msg.alignedComponents
+      });
       setLoading(false);
+      setProgress(null);
     },
     surgeryResult: (msg) => {
       if (msg.updatedTree) {
@@ -67,7 +78,7 @@ export function App() {
   if (tree) {
     return (
       <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0 }}>
-        <ModelGraph tree={tree} loraMap={loraMap} onLoadStats={handleLoadStats} />
+        <ModelGraph tree={tree} loraMap={loraMap} comparison={comparison || undefined} onLoadStats={handleLoadStats} />
       </div>
     );
   }

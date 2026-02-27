@@ -40,7 +40,7 @@ describe('Graph Builder', () => {
     
     // With everything collapsed, we only see layer1
     expect(nodes.length).toBe(1);
-    expect(nodes[0].id).toBe('layer1');
+    expect(nodes[0].id).toBe('A-layer1');
     expect(edges.length).toBe(0); // Only 1 node, so 0 top-level edges
   });
 
@@ -53,9 +53,9 @@ describe('Graph Builder', () => {
     // layer1, layer1.attn, layer1.attn.weight
     expect(nodes.length).toBe(3);
     const ids = nodes.map(n => n.id);
-    expect(ids).toContain('layer1');
-    expect(ids).toContain('layer1.attn');
-    expect(ids).toContain('layer1.attn.weight');
+    expect(ids).toContain('A-layer1');
+    expect(ids).toContain('A-layer1.attn');
+    expect(ids).toContain('A-layer1.attn.weight');
     
     // layer1.attn is inside layer1, layer1.attn.weight is inside layer1.attn
     // Our layout generates edges for siblings.
@@ -69,11 +69,11 @@ describe('Graph Builder', () => {
     
     const { nodes } = buildGraph(mockTree, loraMap, expandedNodes, 'weight', 'all', false, 'highlight');
     
-    const weightNode = nodes.find(n => n.id === 'layer1.attn.weight');
+    const weightNode = nodes.find(n => n.id === 'A-layer1.attn.weight');
     expect(weightNode?.data.isHighlighted).toBe(true);
     expect(weightNode?.data.isDimmed).toBe(false);
 
-    const layerNode = nodes.find(n => n.id === 'layer1');
+    const layerNode = nodes.find(n => n.id === 'A-layer1');
     expect(layerNode?.data.isHighlighted).toBe(false);
     expect(layerNode?.data.isDimmed).toBe(true);
   });
@@ -87,7 +87,7 @@ describe('Graph Builder', () => {
     // layer1 and layer1.attn do not match, but they contain 'weight' which matches,
     // so they are NOT hidden but might be dimmed.
     expect(nodes.length).toBe(3);
-    const weightNode = nodes.find(n => n.id === 'layer1.attn.weight');
+    const weightNode = nodes.find(n => n.id === 'A-layer1.attn.weight');
     expect(weightNode?.data.isHighlighted).toBe(true);
   });
 
@@ -98,7 +98,7 @@ describe('Graph Builder', () => {
     // filterLora = true
     const { nodes } = buildGraph(mockTree, loraMap, expandedNodes, '', 'all', true, 'highlight');
     
-    const layerNode = nodes.find(n => n.id === 'layer1');
+    const layerNode = nodes.find(n => n.id === 'A-layer1');
     // layer1 has lora down the tree, so it should not be dimmed
     expect(layerNode?.data.hasLora).toBe(true);
     expect(layerNode?.data.isDimmed).toBe(false);

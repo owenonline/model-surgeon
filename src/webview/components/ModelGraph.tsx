@@ -14,6 +14,7 @@ import 'reactflow/dist/style.css';
 
 import { ArchitectureNode } from '../../types/tree';
 import { LoraAdapterMap } from '../../types/lora';
+import { AlignedComponent } from '../../types/messages';
 import { buildGraph } from '../utils/graph';
 import { CustomNode } from './CustomNode';
 import { Toolbar } from './Toolbar';
@@ -26,10 +27,15 @@ const nodeTypes: NodeTypes = {
 interface ModelGraphProps {
   tree: ArchitectureNode;
   loraMap: LoraAdapterMap;
+  comparison?: {
+    treeB: ArchitectureNode;
+    loraMapB: LoraAdapterMap;
+    alignedComponents: AlignedComponent[];
+  };
   onLoadStats?: (node: ArchitectureNode) => void;
 }
 
-function ModelGraphInner({ tree, loraMap, onLoadStats }: ModelGraphProps) {
+function ModelGraphInner({ tree, loraMap, comparison, onLoadStats }: ModelGraphProps) {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<'highlight' | 'isolate'>('highlight');
@@ -82,17 +88,18 @@ function ModelGraphInner({ tree, loraMap, onLoadStats }: ModelGraphProps) {
       searchQuery, 
       filterDtype, 
       filterLora, 
-      filterMode
+      filterMode,
+      comparison
     );
     setNodes(data.nodes);
     setEdges(data.edges);
-  }, [tree, loraMap, expandedNodes, searchQuery, filterDtype, filterLora, filterMode, setNodes, setEdges]);
+  }, [tree, loraMap, expandedNodes, searchQuery, filterDtype, filterLora, filterMode, comparison, setNodes, setEdges]);
 
   // Find selected node details
   const selectedNodeData = useMemo(() => {
     if (!selectedNodeId) return null;
     const n = nodes.find(n => n.id === selectedNodeId);
-    return n ? n.data.node as ArchitectureNode : null;
+    return n ? n.data : null;
   }, [selectedNodeId, nodes]);
 
   return (
@@ -140,10 +147,11 @@ function ModelGraphInner({ tree, loraMap, onLoadStats }: ModelGraphProps) {
         </div>
         {selectedNodeData && (
           <DetailPanel 
-            node={selectedNodeData} 
+            data={selectedNodeData} 
             loraMap={loraMap} 
+            comparison={comparison}
             onClose={() => setSelectedNodeId(null)}
-            onLoadStats={onLoadStats}
+            onLoadStats={(n) => onLoadStats && onLoadStats(n)}
           />
         )}
       </div>
