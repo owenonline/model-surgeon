@@ -8,16 +8,24 @@ import { alignArchitectures } from './parsers/alignment';
 import { WorkerPool } from './workers/workerPool';
 import { MessageHost } from './protocol/messageHost';
 import { PROTOCOL_VERSION } from './types/messages';
+import { SurgerySession } from './surgery/SurgerySession';
+import { UnifiedTensorMap } from './types/safetensors';
 
 let workerPool: WorkerPool | undefined;
 let currentPanel: vscode.WebviewPanel | undefined;
 let currentMessageHost: MessageHost | undefined;
+let currentSurgerySession: SurgerySession | undefined;
 
 let currentModelA: {
   filePath: string;
   tree: import('./types/tree').ArchitectureNode;
   loraMap: import('./types/lora').LoraAdapterMap;
-  tensors: Record<string, import('./types/safetensors').TensorInfo>;
+  tensors: Record<string, import('./types/safetensors').ShardedTensorInfo>;
+} | undefined;
+
+let currentModelB: {
+  tensors: Record<string, import('./types/safetensors').ShardedTensorInfo>;
+  shardHeaderLengths: Record<string, number>;
 } | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
@@ -117,6 +125,71 @@ async function openModel(filePath: string, context: vscode.ExtensionContext) {
     await loadAndSendModel(msg.filePath, messageHost);
   });
 
+  messageHost.onMessage('loadComparison', async (msg) => {
+    await loadAndCompareModel(msg.filePath, messageHost);
+  });
+
+  messageHost.onMessage('performSurgery', async (msg) => {
+    if (!currentSurgerySession) {
+      messageHost.postMessage({
+        type: 'surgeryResult',
+        protocolVersion: PROTOCOL_VERSION,
+        success: false,
+        error: 'No active surgery session',
+      });
+      return;
+    }
+
+    try {
+      const op = msg.operation;
+      switch (op.operationType) {
+        case 'renameTensor':
+          if (!op.newName) throw new Error('newName required for renameTensor');
+          currentSurgerySession.renameComponent(op.targetPath, op.newName);
+          break;
+        case 'removeTensor':
+          currentSurgerySession.removeTensor(op.targetPath);
+          break;
+        case 'renameLoraAdapter':
+          if (!op.newName) throw new Error('newName required for renameLoraAdapter');
+          currentSurgerySession.renameLoraAdapter(op.targetPath, op.newName);
+          break;
+        case 'removeLoraAdapter':
+          currentSurgerySession.removeLoraAdapter(op.targetPath);
+          break;
+        case 'replaceTensor':
+          if (op.sourceModel === 'B' && currentModelB) {
+             currentSurgerySession.replaceComponent(op.targetPath, currentModelB.tensors, currentModelB.shardHeaderLengths);
+          } else {
+             throw new Error('Source model B not available');
+          }
+          break;
+        default:
+          throw new Error(`Unknown operation type: ${op.operationType}`);
+      }
+
+      const currentState = currentSurgerySession.getCurrentState();
+      // Need to re-build tree and lora map to send back
+      // Since surgery might change adapters, we should re-detect
+      const newLoraMap = detectLoraAdapters(currentState.tensors, {}); // we don't carry full adapter config for now or it's unchanged?
+      const newTree = buildArchitectureTree(currentState.tensors, newLoraMap);
+
+      messageHost.postMessage({
+        type: 'surgeryResult',
+        protocolVersion: PROTOCOL_VERSION,
+        success: true,
+        updatedTree: newTree,
+      });
+    } catch (err: unknown) {
+      messageHost.postMessage({
+        type: 'surgeryResult',
+        protocolVersion: PROTOCOL_VERSION,
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   await loadAndSendModel(filePath, messageHost);
 }
 
@@ -131,15 +204,25 @@ async function loadAndSendModel(filePath: string, messageHost: MessageHost) {
     });
 
     const sharded = await isShardedModel(filePath);
-    let tensors: Record<string, import('./types/safetensors').TensorInfo>;
+    let tensors: Record<string, import('./types/safetensors').ShardedTensorInfo>;
+    let unifiedModel: UnifiedTensorMap;
 
     if (sharded) {
-      const unified = await loadShardedModel(filePath);
-      tensors = unified.tensors;
+      unifiedModel = await loadShardedModel(filePath);
+      tensors = unifiedModel.tensors;
     } else {
       const header = await parseHeader(filePath);
-      tensors = header.tensors;
+      tensors = Object.fromEntries(
+        Object.entries(header.tensors).map(([k, v]) => [k, { ...v, shardFile: filePath }])
+      );
+      unifiedModel = {
+        metadata: header.metadata,
+        tensors,
+        shardHeaderLengths: { [filePath]: header.headerLength }
+      };
     }
+
+    currentSurgerySession = new SurgerySession(unifiedModel);
 
     messageHost.postMessage({
       type: 'progress',
@@ -198,15 +281,22 @@ async function loadAndCompareModel(filePath: string, messageHost: MessageHost) {
     });
 
     const sharded = await isShardedModel(filePath);
-    let tensors: Record<string, import('./types/safetensors').TensorInfo>;
+    let tensors: Record<string, import('./types/safetensors').ShardedTensorInfo>;
+    let shardHeaderLengths: Record<string, number>;
 
     if (sharded) {
       const unified = await loadShardedModel(filePath);
       tensors = unified.tensors;
+      shardHeaderLengths = unified.shardHeaderLengths;
     } else {
       const header = await parseHeader(filePath);
-      tensors = header.tensors;
+      tensors = Object.fromEntries(
+        Object.entries(header.tensors).map(([k, v]) => [k, { ...v, shardFile: filePath }])
+      );
+      shardHeaderLengths = { [filePath]: header.headerLength };
     }
+    
+    currentModelB = { tensors, shardHeaderLengths };
 
     messageHost.postMessage({
       type: 'progress',
