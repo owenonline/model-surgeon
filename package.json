@@ -1,0 +1,91 @@
+{
+  "name": "model-surgeon",
+  "displayName": "Model Surgeon",
+  "description": "Visualize, compare, and surgically modify neural network models in safetensors format.",
+  "version": "1.0.0",
+  "publisher": "model-surgeon",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Visualization"
+  ],
+  "keywords": [
+    "safetensors",
+    "neural network",
+    "model",
+    "LoRA",
+    "visualization"
+  ],
+  "activationEvents": [
+    "onLanguage:safetensors"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "modelSurgeon.openModel",
+        "title": "Open Model",
+        "category": "Model Surgeon"
+      },
+      {
+        "command": "modelSurgeon.openComparison",
+        "title": "Open Comparison",
+        "category": "Model Surgeon"
+      },
+      {
+        "command": "modelSurgeon.saveSurgeryResult",
+        "title": "Save Surgery Result",
+        "category": "Model Surgeon"
+      }
+    ],
+    "languages": [
+      {
+        "id": "safetensors",
+        "extensions": [
+          ".safetensors"
+        ],
+        "aliases": [
+          "Safetensors"
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "build": "npm run build:ext && npm run build:webview",
+    "build:ext": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --sourcemap --target=node18",
+    "build:webview": "esbuild src/webview/index.tsx --bundle --outfile=dist/webview/main.js --format=esm --sourcemap --target=es2020 --loader:.tsx=tsx --loader:.ts=ts --loader:.css=css",
+    "watch": "concurrently \"npm run watch:ext\" \"npm run watch:webview\"",
+    "watch:ext": "npm run build:ext -- --watch",
+    "watch:webview": "npm run build:webview -- --watch",
+    "lint": "eslint src/ --ext .ts,.tsx",
+    "lint:fix": "eslint src/ --ext .ts,.tsx --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx,json,css}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,json,css}\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package": "vsce package",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "concurrently": "^8.2.2",
+    "esbuild": "^0.20.0",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.2.4",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}
