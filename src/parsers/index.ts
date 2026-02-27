@@ -3,3 +3,5 @@ export { readTensorData, readTensorByName, readTensorFromUnifiedMap } from './te
 export { loadShardedModel, isShardedModel } from './shardedModel';
 export { detectLoraAdapters, parseAdapterConfig, parseAdapterConfigFromDir } from './loraDetector';
 export { buildArchitectureTree } from './treeBuilder';
+export { serialize } from './serializer';
+export type { SerializationInput, SerializedTensorInfo } from './serializer';

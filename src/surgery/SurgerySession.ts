@@ -1,10 +1,11 @@
 import { UnifiedTensorMap, ShardedTensorInfo } from '../types/safetensors';
 import { SurgeryOperation } from '../types/messages';
 
-interface SurgeryState {
+export interface SurgeryState {
   tensors: Record<string, ShardedTensorInfo>;
   metadata: Record<string, string>;
   shardHeaderLengths: Record<string, number>;
+  operation?: SurgeryOperation;
 }
 
 export class SurgerySession {
@@ -52,8 +53,13 @@ export class SurgerySession {
   }
 
   public get history(): SurgeryOperation[] {
-     // TODO: To properly support history, we should store operations along with states
-     return [];
+    const ops: SurgeryOperation[] = [];
+    for (let i = 1; i <= this.currentIndex; i++) {
+      if (this.states[i].operation) {
+        ops.push(this.states[i].operation!);
+      }
+    }
+    return ops;
   }
 
   private pushState(newState: SurgeryState) {
@@ -98,7 +104,8 @@ export class SurgerySession {
     this.pushState({
       tensors: newTensors,
       metadata: { ...currentState.metadata },
-      shardHeaderLengths: { ...currentState.shardHeaderLengths }
+      shardHeaderLengths: { ...currentState.shardHeaderLengths },
+      operation: { operationType: 'renameTensor', targetPath, newName }
     });
   }
 
@@ -119,7 +126,8 @@ export class SurgerySession {
     this.pushState({
       tensors: newTensors,
       metadata: { ...currentState.metadata },
-      shardHeaderLengths: { ...currentState.shardHeaderLengths }
+      shardHeaderLengths: { ...currentState.shardHeaderLengths },
+      operation: { operationType: 'removeLoraAdapter', targetPath }
     });
   }
 
@@ -153,7 +161,8 @@ export class SurgerySession {
     this.pushState({
       tensors: newTensors,
       metadata: { ...currentState.metadata },
-      shardHeaderLengths: { ...currentState.shardHeaderLengths }
+      shardHeaderLengths: { ...currentState.shardHeaderLengths },
+      operation: { operationType: 'renameLoraAdapter', targetPath, newName: newAdapterPrefix }
     });
   }
 
@@ -180,7 +189,8 @@ export class SurgerySession {
     this.pushState({
       tensors: newTensors,
       metadata: { ...currentState.metadata },
-      shardHeaderLengths: { ...currentState.shardHeaderLengths, ...sourceModelHeaders }
+      shardHeaderLengths: { ...currentState.shardHeaderLengths, ...sourceModelHeaders },
+      operation: { operationType: 'replaceTensor', targetPath }
     });
   }
 
@@ -199,7 +209,8 @@ export class SurgerySession {
     this.pushState({
       tensors: newTensors,
       metadata: { ...currentState.metadata },
-      shardHeaderLengths: { ...currentState.shardHeaderLengths }
+      shardHeaderLengths: { ...currentState.shardHeaderLengths },
+      operation: { operationType: 'removeTensor', targetPath }
     });
   }
 }
