@@ -33,10 +33,23 @@ export interface ComparisonResultMessage {
   filePathB: string;
 }
 
+export interface TensorDiffMetrics {
+  /** Cosine similarity between the two weight vectors: 1 = identical direction, 0 = orthogonal. */
+  cosineSimilarity: number;
+  /** L2 norm of (A - B). */
+  l2NormDiff: number;
+  /** Maximum per-element absolute difference. */
+  maxAbsDiff: number;
+  /** Mean per-element absolute difference. */
+  meanAbsDiff: number;
+}
+
 export interface AlignedComponent {
   path: string;
   status: 'matched' | 'onlyA' | 'onlyB';
   shapeMismatch?: boolean;
+  /** Populated for matched parameter nodes that are small enough to read eagerly. */
+  diffMetrics?: TensorDiffMetrics;
 }
 
 export interface PerformSurgeryMessage {

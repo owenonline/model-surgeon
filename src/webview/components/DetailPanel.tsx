@@ -118,9 +118,18 @@ export function DetailPanel({ data, loraMap, comparison, onClose, onLoadStats }:
           <h4 style={{ margin: '0 0 8px 0' }}>LoRA Adapters</h4>
           {data.loraAdapters.map((adapter: any, i: number) => (
             <div key={i} style={{ backgroundColor: 'var(--vscode-editor-background)', padding: '8px', borderRadius: '4px', marginBottom: '8px' }}>
-              <div><strong>Rank:</strong> {adapter.r}</div>
-              <div><strong>Alpha:</strong> {adapter.alpha}</div>
-              <div><strong>Scale:</strong> {(adapter.alpha / adapter.r).toFixed(2)}</div>
+              <div><strong>Adapter:</strong> {adapter.adapterName ?? '(default)'}</div>
+              {adapter.rank != null && <div><strong>Rank:</strong> {adapter.rank}</div>}
+              {adapter.alpha != null && <div><strong>Alpha:</strong> {adapter.alpha}</div>}
+              {adapter.rank != null && adapter.alpha != null && (
+                <div><strong>Scale:</strong> {(adapter.alpha / adapter.rank).toFixed(3)}</div>
+              )}
+              {adapter.aShape?.length > 0 && (
+                <div><strong>A shape:</strong> [{adapter.aShape.join(', ')}]</div>
+              )}
+              {adapter.bShape?.length > 0 && (
+                <div><strong>B shape:</strong> [{adapter.bShape.join(', ')}]</div>
+              )}
             </div>
           ))}
         </div>

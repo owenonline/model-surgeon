@@ -36,9 +36,20 @@ function getComparisonColor(path: string, alignedComponents: AlignedComponent[] 
   const canonical = path.replace(/^base_model\.model\./, '');
   const entry = alignedComponents.find((c) => c.path === canonical);
   if (!entry) return '#6c757d';
-  if (entry.status === 'matched' && !entry.shapeMismatch) return '#28a745';
-  if (entry.status === 'matched' && entry.shapeMismatch) return '#ffc107';
-  return '#dc3545';
+
+  if (entry.status === 'onlyA' || entry.status === 'onlyB') return '#dc3545'; // red — absent
+  if (entry.shapeMismatch) return '#ffc107'; // yellow — structural mismatch
+
+  // Use actual cosine similarity when available
+  if (entry.diffMetrics) {
+    const cs = entry.diffMetrics.cosineSimilarity;
+    if (cs > 0.999) return '#28a745'; // green — effectively identical
+    if (cs > 0.90) return '#ffc107';  // yellow — moderate drift
+    return '#dc3545';                  // red — significant change (trained weights)
+  }
+
+  // Fallback for large tensors where diff was skipped
+  return '#28a745';
 }
 
 function getAlignedStatus(path: string, alignedComponents: AlignedComponent[] | undefined): AlignedComponent | undefined {
@@ -595,6 +606,7 @@ export function SequentialView({ tree, loraMap, comparison, onLoadStats }: Seque
     node: ArchitectureNode;
     modelId: 'A' | 'B';
     comparisonStatus?: AlignedComponent;
+    diffMetrics?: import('../../types/messages').TensorDiffMetrics;
     loraAdapters: unknown[];
   } | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -633,7 +645,7 @@ export function SequentialView({ tree, loraMap, comparison, onLoadStats }: Seque
       const loraAdapters = node.adapters
         ? Object.values(node.adapters)
         : currentLoraMap[node.fullPath] ?? [];
-      setSelectedNodeData({ node, modelId, comparisonStatus, loraAdapters });
+      setSelectedNodeData({ node, modelId, comparisonStatus, diffMetrics: comparisonStatus?.diffMetrics, loraAdapters });
     },
     [loraMap, comparison],
   );
@@ -702,6 +714,7 @@ export function SequentialView({ tree, loraMap, comparison, onLoadStats }: Seque
       node: selectedNodeData.node,
       modelId: selectedNodeData.modelId,
       comparisonStatus: selectedNodeData.comparisonStatus,
+      diffMetrics: selectedNodeData.diffMetrics,
       loraAdapters: selectedNodeData.loraAdapters,
     };
   }, [selectedNodeData]);

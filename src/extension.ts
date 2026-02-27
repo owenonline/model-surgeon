@@ -5,6 +5,7 @@ import { loadShardedModel, isShardedModel } from './parsers/shardedModel';
 import { detectLoraAdapters, parseAdapterConfig } from './parsers/loraDetector';
 import { buildArchitectureTree } from './parsers/treeBuilder';
 import { alignArchitectures } from './parsers/alignment';
+import { computeTensorDiffs } from './parsers/tensorDiff';
 import { WorkerPool } from './workers/workerPool';
 import { MessageHost } from './protocol/messageHost';
 import { PROTOCOL_VERSION } from './types/messages';
@@ -25,6 +26,7 @@ let currentModelA: {
   tree: import('./types/tree').ArchitectureNode;
   loraMap: import('./types/lora').LoraAdapterMap;
   tensors: Record<string, import('./types/safetensors').ShardedTensorInfo>;
+  shardHeaderLengths: Record<string, number>;
 } | undefined;
 
 let currentModelB: {
@@ -367,7 +369,7 @@ async function loadAndSendModel(filePath: string, messageHost: MessageHost) {
 
     const tree = buildArchitectureTree(tensors, loraMap);
 
-    currentModelA = { filePath, tree, loraMap, tensors };
+    currentModelA = { filePath, tree, loraMap, tensors, shardHeaderLengths: unifiedModel.shardHeaderLengths };
 
     messageHost.postMessage({
       type: 'modelLoaded',
@@ -441,6 +443,33 @@ async function loadAndCompareModel(filePath: string, messageHost: MessageHost) {
 
     const treeB = buildArchitectureTree(tensors, loraMap);
     const alignedComponents = alignArchitectures(currentModelA.tree, treeB);
+
+    messageHost.postMessage({
+      type: 'progress',
+      protocolVersion: PROTOCOL_VERSION,
+      taskId: 'load-compare',
+      label: 'Computing weight diffs',
+      percent: 90,
+    });
+
+    // Collect paths of matched parameter nodes so we can compute actual diffs.
+    const matchedParamPaths = alignedComponents
+      .filter((c) => c.status === 'matched' && !c.shapeMismatch)
+      .map((c) => c.path);
+
+    const diffMap = await computeTensorDiffs(
+      currentModelA.tensors,
+      currentModelA.shardHeaderLengths,
+      tensors,
+      shardHeaderLengths,
+      matchedParamPaths,
+    );
+
+    // Attach diff metrics to the alignment entries in-place.
+    for (const entry of alignedComponents) {
+      const metrics = diffMap.get(entry.path);
+      if (metrics) entry.diffMetrics = metrics;
+    }
 
     messageHost.postMessage({
       type: 'comparisonResult',

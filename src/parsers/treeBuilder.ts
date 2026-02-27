@@ -2,9 +2,6 @@ import { TensorInfo } from '../types/safetensors';
 import { LoraAdapterMap, LoraAdapterPair } from '../types/lora';
 import { ArchitectureNode, NodeType } from '../types/tree';
 
-const LORA_PATTERN = /\.lora_(A|B)(?:\.[^.]+)?\.weight$/;
-const BASE_LAYER_PATTERN = /\.base_layer\.weight$/;
-
 export function buildArchitectureTree(
   tensors: Record<string, TensorInfo>,
   loraMap: LoraAdapterMap = {},
@@ -16,20 +13,13 @@ export function buildArchitectureTree(
     children: [],
   };
 
-  const loraTensorNames = new Set<string>();
-  for (const pairs of Object.values(loraMap)) {
-    for (const pair of pairs) {
-      loraTensorNames.add(pair.loraAName);
-      loraTensorNames.add(pair.loraBName);
-    }
-  }
-
   // Counter shared across all insertTensor calls so first-seen order is preserved.
   let insertionCounter = 0;
 
+  // All tensors go into the tree, including lora_A / lora_B and base_layer entries.
+  // LoRA tensors appear as regular nodes (lora_A/read_adapter/weight, etc.) so that
+  // comparison mode can align and color them just like any other parameter.
   for (const [name, info] of Object.entries(tensors)) {
-    if (loraTensorNames.has(name)) continue;
-    if (LORA_PATTERN.test(name)) continue;
     insertTensor(root, name, info, insertionCounter++);
   }
 

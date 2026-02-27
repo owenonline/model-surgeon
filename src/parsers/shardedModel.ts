@@ -64,28 +64,29 @@ export async function loadShardedModel(indexOrShardPath: string): Promise<Unifie
   const metadata: Record<string, string> = { ...(index.metadata ?? {}) };
 
   for (const shard of shardFiles) {
+    const shardAbsPath = path.join(dir, shard);
     const header = shardHeaders[shard];
-    shardHeaderLengths[shard] = header.headerLength;
+    shardHeaderLengths[shardAbsPath] = header.headerLength;
 
     Object.assign(metadata, header.metadata);
   }
 
-  for (const [tensorName, shardFile] of Object.entries(index.weight_map)) {
-    const header = shardHeaders[shardFile];
+  for (const [tensorName, shardBaseName] of Object.entries(index.weight_map)) {
+    const header = shardHeaders[shardBaseName];
     if (!header) {
-      throw new Error(`Shard "${shardFile}" referenced in index but not parsed`);
+      throw new Error(`Shard "${shardBaseName}" referenced in index but not parsed`);
     }
 
     const tensorInfo = header.tensors[tensorName];
     if (!tensorInfo) {
       throw new Error(
-        `Tensor "${tensorName}" referenced in index but not found in shard "${shardFile}"`,
+        `Tensor "${tensorName}" referenced in index but not found in shard "${shardBaseName}"`,
       );
     }
 
     tensors[tensorName] = {
       ...tensorInfo,
-      shardFile,
+      shardFile: path.join(dir, shardBaseName),
     };
   }
 
@@ -97,17 +98,17 @@ export async function loadShardedModel(indexOrShardPath: string): Promise<Unifie
  */
 async function loadSingleFileAsUnified(filePath: string): Promise<UnifiedTensorMap> {
   const header = await parseHeader(filePath);
-  const fileName = path.basename(filePath);
+  const absPath = path.resolve(filePath);
   const tensors: Record<string, ShardedTensorInfo> = {};
 
   for (const [name, info] of Object.entries(header.tensors)) {
-    tensors[name] = { ...info, shardFile: fileName };
+    tensors[name] = { ...info, shardFile: absPath };
   }
 
   return {
     metadata: header.metadata,
     tensors,
-    shardHeaderLengths: { [fileName]: header.headerLength },
+    shardHeaderLengths: { [absPath]: header.headerLength },
   };
 }
 
