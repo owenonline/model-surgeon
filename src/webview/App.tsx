@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useMessage } from './hooks/useMessage';
 import { ArchitectureNode } from '../types/tree';
 import { LoraAdapterMap } from '../types/lora';
+import { ModelGraph } from './components/ModelGraph';
 
 export function App() {
   const [tree, setTree] = useState<ArchitectureNode | null>(null);
@@ -38,32 +39,44 @@ export function App() {
     },
   });
 
+  const handleLoadStats = (node: ArchitectureNode) => {
+    // Send a message to the extension to load stats
+    // vscode API is handled by the hook/host, we would add a message type for it
+  };
+
+  if (error) {
+    return (
+      <div style={{ padding: '16px', fontFamily: 'var(--vscode-font-family)', color: 'var(--vscode-errorForeground)' }}>
+        {error}
+      </div>
+    );
+  }
+
+  if (loading) {
+    return <div style={{ padding: '16px' }}>Loading...</div>;
+  }
+
+  if (progress) {
+    return (
+      <div style={{ padding: '16px' }}>
+        {progress.label}: {Math.round(progress.percent)}%
+      </div>
+    );
+  }
+
+  if (tree) {
+    return (
+      <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0 }}>
+        <ModelGraph tree={tree} loraMap={loraMap} onLoadStats={handleLoadStats} />
+      </div>
+    );
+  }
+
   return (
     <div style={{ padding: '16px', fontFamily: 'var(--vscode-font-family)' }}>
-      {error && (
-        <div style={{ color: 'var(--vscode-errorForeground)', marginBottom: '8px' }}>
-          {error}
-        </div>
-      )}
-      {loading && <div>Loading...</div>}
-      {progress && (
-        <div>
-          {progress.label}: {Math.round(progress.percent)}%
-        </div>
-      )}
-      {tree && (
-        <div>
-          <h2>Model: {tree.name}</h2>
-          <p>Tensors with LoRA adapters: {Object.keys(loraMap).length}</p>
-          <p>Top-level children: {tree.children.length}</p>
-        </div>
-      )}
-      {!tree && !loading && !error && (
-        <div>
-          <h2>Model Surgeon</h2>
-          <p>Open a safetensors file to get started.</p>
-        </div>
-      )}
+      <h2>Model Surgeon</h2>
+      <p>Open a safetensors file to get started.</p>
     </div>
   );
 }
+
