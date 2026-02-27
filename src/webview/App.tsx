@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useMessage } from './hooks/useMessage';
 import { ArchitectureNode } from '../types/tree';
 import { LoraAdapterMap } from '../types/lora';
-import { ModelGraph } from './components/ModelGraph';
+import { SequentialView } from './components/SequentialView';
 
 export function App() {
   const [tree, setTree] = useState<ArchitectureNode | null>(null);
@@ -94,7 +94,7 @@ export function App() {
   if (tree) {
     return (
       <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0 }}>
-        <ModelGraph tree={tree} loraMap={loraMap} comparison={comparison || undefined} onLoadStats={handleLoadStats} />
+        <SequentialView tree={tree} loraMap={loraMap} comparison={comparison || undefined} onLoadStats={handleLoadStats} />
       </div>
     );
   }

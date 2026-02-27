@@ -24,10 +24,13 @@ export function buildArchitectureTree(
     }
   }
 
+  // Counter shared across all insertTensor calls so first-seen order is preserved.
+  let insertionCounter = 0;
+
   for (const [name, info] of Object.entries(tensors)) {
     if (loraTensorNames.has(name)) continue;
     if (LORA_PATTERN.test(name)) continue;
-    insertTensor(root, name, info);
+    insertTensor(root, name, info, insertionCounter++);
   }
 
   for (const [modulePath, pairs] of Object.entries(loraMap)) {
@@ -38,7 +41,12 @@ export function buildArchitectureTree(
   return root;
 }
 
-function insertTensor(root: ArchitectureNode, fullName: string, info: TensorInfo): void {
+function insertTensor(
+  root: ArchitectureNode,
+  fullName: string,
+  info: TensorInfo,
+  insertionCounter: number,
+): void {
   const segments = fullName.split('.');
   let current = root;
 
@@ -54,6 +62,7 @@ function insertTensor(root: ArchitectureNode, fullName: string, info: TensorInfo
         type: 'parameter',
         children: [],
         tensorInfo: { dtype: info.dtype, shape: info.shape },
+        insertionIndex: insertionCounter,
       });
     } else {
       let child = current.children.find((c) => c.name === segment);
@@ -64,6 +73,8 @@ function insertTensor(root: ArchitectureNode, fullName: string, info: TensorInfo
           fullPath: currentPath,
           type: nodeType,
           children: [],
+          // Record insertionIndex only once, when the node is first created.
+          insertionIndex: insertionCounter,
         };
         if (nodeType === 'block' && isNumericSegment(segment)) {
           child.blockIndex = parseInt(segment, 10);
@@ -108,12 +119,18 @@ function attachLoraAdapters(
 
 function sortTree(node: ArchitectureNode): void {
   node.children.sort((a, b) => {
+    // Numeric block nodes always sort by their block index.
     if (a.blockIndex !== undefined && b.blockIndex !== undefined) {
       return a.blockIndex - b.blockIndex;
     }
     if (a.blockIndex !== undefined) return -1;
     if (b.blockIndex !== undefined) return 1;
-    return a.name.localeCompare(b.name);
+
+    // For named components, use the order they first appeared in the file
+    // (forward-pass / module-registration order) rather than alphabetical order.
+    const ai = a.insertionIndex ?? 0;
+    const bi = b.insertionIndex ?? 0;
+    return ai - bi;
   });
 
   for (const child of node.children) {

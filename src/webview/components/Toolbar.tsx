@@ -41,7 +41,7 @@ export function Toolbar({
       <div style={{ display: 'flex', gap: '4px' }}>
         <button onClick={onExpandAll}>Expand All</button>
         <button onClick={onCollapseAll}>Collapse All</button>
-        <button onClick={onFitView}>Fit View</button>
+        <button onClick={onFitView}>Reset</button>
       </div>
       
       <div style={{ width: '1px', height: '20px', backgroundColor: 'var(--vscode-panel-border)', margin: '0 8px' }} />
@@ -169,16 +169,15 @@ export function Toolbar({
             ✕
           </button>
           <h2 style={{ marginTop: 0, borderBottom: '1px solid var(--vscode-panel-border)', paddingBottom: '8px' }}>Model Surgeon Quick Reference</h2>
-          
-          <h3 style={{ fontSize: '14px', marginBottom: '4px' }}>Keyboard Shortcuts</h3>
+
+          <h3 style={{ fontSize: '14px', marginBottom: '4px' }}>Navigation</h3>
           <ul style={{ margin: '0 0 16px 0', paddingLeft: '20px', fontSize: '13px' }}>
-            <li><kbd>Ctrl/Cmd + F</kbd> - Focus search bar</li>
-            <li><kbd>Double Click</kbd> - Collapse/expand node</li>
-            <li><kbd>Ctrl/Cmd + Z</kbd> - Undo last surgery</li>
-            <li><kbd>Ctrl/Cmd + Shift + Z</kbd> - Redo surgery</li>
+            <li><strong>Click</strong> a row — expand/collapse and open detail panel</li>
+            <li><strong>Right-click</strong> — open surgery context menu</li>
+            <li><kbd>Ctrl/Cmd + F</kbd> — focus search bar</li>
           </ul>
 
-          <h3 style={{ fontSize: '14px', marginBottom: '4px' }}>Node Types</h3>
+          <h3 style={{ fontSize: '14px', marginBottom: '4px' }}>Left-bar Colors (type)</h3>
           <ul style={{ margin: '0 0 16px 0', paddingLeft: '0', fontSize: '13px', listStyle: 'none' }}>
             {[
               { color: '#4fc1ff', label: 'Block', desc: 'Numbered layers (e.g. layers.0, h.3)' },
@@ -186,27 +185,38 @@ export function Toolbar({
               { color: '#aaaaaa', label: 'Parameter', desc: 'Leaf tensors (weight, bias, etc.)' },
             ].map(({ color, label, desc }) => (
               <li key={label} style={{ marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{
-                  display: 'inline-block', width: '4px', height: '20px',
-                  backgroundColor: color, borderRadius: '2px', flexShrink: 0,
-                }} />
+                <span style={{ display: 'inline-block', width: '4px', height: '20px', backgroundColor: color, borderRadius: '2px', flexShrink: 0 }} />
                 <span><strong>{label}</strong> — {desc}</span>
               </li>
             ))}
           </ul>
 
-          <h3 style={{ fontSize: '14px', marginBottom: '4px' }}>Node Colors & Indicators</h3>
-          <ul style={{ margin: '0 0 16px 0', paddingLeft: '20px', fontSize: '13px', listStyle: 'none' }}>
-            <li style={{ marginBottom: '4px' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#89d185', marginRight: '8px' }}></span>Node has LoRA adapter (hover to see adapter names)</li>
-            <li style={{ marginBottom: '4px' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid #28a745', marginRight: '8px' }}></span>Comparison: Identical / High similarity</li>
-            <li style={{ marginBottom: '4px' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid #ffc107', marginRight: '8px' }}></span>Comparison: Moderate diff</li>
-            <li style={{ marginBottom: '4px' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid #dc3545', marginRight: '8px' }}></span>Comparison: High diff</li>
-            <li style={{ marginBottom: '4px' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px dashed #888', marginRight: '8px' }}></span>Comparison: Absent in other model</li>
+          <h3 style={{ fontSize: '14px', marginBottom: '4px' }}>Comparison Hover Colors</h3>
+          <p style={{ margin: '0 0 6px 0', fontSize: '12px', color: 'var(--vscode-descriptionForeground)' }}>
+            Hover over a row in comparison mode to see the left-bar and connector line change color:
+          </p>
+          <ul style={{ margin: '0 0 16px 0', paddingLeft: '0', fontSize: '13px', listStyle: 'none' }}>
+            <li style={{ marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ display: 'inline-block', width: '4px', height: '20px', backgroundColor: '#28a745', borderRadius: '2px', flexShrink: 0 }} />
+              <span>Matched — identical structure</span>
+            </li>
+            <li style={{ marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ display: 'inline-block', width: '4px', height: '20px', backgroundColor: '#ffc107', borderRadius: '2px', flexShrink: 0 }} />
+              <span>Matched — shape mismatch</span>
+            </li>
+            <li style={{ marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ display: 'inline-block', width: '4px', height: '20px', backgroundColor: '#dc3545', borderRadius: '2px', flexShrink: 0 }} />
+              <span>Absent in other model</span>
+            </li>
+            <li style={{ marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ display: 'inline-block', width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#89d185', flexShrink: 0 }} />
+              <span>Has LoRA adapter</span>
+            </li>
           </ul>
 
           <h3 style={{ fontSize: '14px', marginBottom: '4px' }}>Surgery Workflow</h3>
           <ol style={{ margin: 0, paddingLeft: '20px', fontSize: '13px' }}>
-            <li>Right-click nodes to rename or remove tensors.</li>
+            <li>Right-click rows to rename or remove tensors.</li>
             <li>In comparison mode, right-click to replace with the other model's version.</li>
             <li>Pending operations queue up in the session.</li>
             <li>Run <strong>Save Surgery Result</strong> to apply changes to a new file.</li>
