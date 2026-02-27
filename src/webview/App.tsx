@@ -69,8 +69,22 @@ export function App() {
 
   if (progress) {
     return (
-      <div style={{ padding: '16px' }}>
-        {progress.label}: {Math.round(progress.percent)}%
+      <div style={{ padding: '16px', fontFamily: 'var(--vscode-font-family)', color: 'var(--vscode-foreground)' }}>
+        <p>{progress.label}</p>
+        <div style={{
+          width: '100%',
+          height: '10px',
+          backgroundColor: 'var(--vscode-progressBar-background)',
+          borderRadius: '5px',
+          overflow: 'hidden'
+        }}>
+          <div style={{
+            width: `${Math.max(0, Math.min(100, progress.percent))}%`,
+            height: '100%',
+            backgroundColor: 'var(--vscode-button-background)',
+            transition: 'width 0.3s ease'
+          }} />
+        </div>
       </div>
     );
   }
@@ -84,9 +98,31 @@ export function App() {
   }
 
   return (
-    <div style={{ padding: '16px', fontFamily: 'var(--vscode-font-family)' }}>
-      <h2>Model Surgeon</h2>
-      <p>Open a safetensors file to get started.</p>
+    <div style={{ padding: '32px', fontFamily: 'var(--vscode-font-family)', color: 'var(--vscode-foreground)', maxWidth: '600px', margin: '0 auto' }}>
+      <h1 style={{ fontSize: '24px', marginBottom: '16px', fontWeight: 'bold' }}>Welcome to Model Surgeon</h1>
+      <p style={{ fontSize: '14px', marginBottom: '24px', lineHeight: '1.5' }}>
+        Visualize, compare, and surgically modify neural network models in safetensors format.
+      </p>
+      
+      <div style={{ marginBottom: '32px' }}>
+        <h2 style={{ fontSize: '18px', marginBottom: '12px', borderBottom: '1px solid var(--vscode-panel-border)', paddingBottom: '8px' }}>Get Started</h2>
+        <ol style={{ paddingLeft: '24px', fontSize: '14px', lineHeight: '1.8' }}>
+          <li>Open a <code style={{ backgroundColor: 'var(--vscode-textCodeBlock-background)', padding: '2px 4px', borderRadius: '3px' }}>.safetensors</code> file from your workspace, or use the <strong>Model Surgeon: Open Model</strong> command.</li>
+          <li>Explore the architecture graph, expand/collapse layers, and inspect tensors.</li>
+          <li>Load a second model via <strong>Model Surgeon: Open Comparison</strong> to see weight differences side-by-side.</li>
+          <li>Right-click nodes to perform surgeries (rename, remove, replace).</li>
+          <li>Save your changes to a new file via <strong>Model Surgeon: Save Surgery Result</strong>.</li>
+        </ol>
+      </div>
+
+      <div style={{ padding: '16px', backgroundColor: 'var(--vscode-textBlockQuote-background)', borderLeft: '4px solid var(--vscode-textBlockQuote-border)', borderRadius: '2px' }}>
+        <h3 style={{ fontSize: '14px', margin: '0 0 8px 0' }}>Keyboard Shortcuts</h3>
+        <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px' }}>
+          <li><kbd>Ctrl/Cmd + F</kbd>: Search and filter</li>
+          <li><kbd>Ctrl/Cmd + Z</kbd>: Undo surgery</li>
+          <li><kbd>Ctrl/Cmd + Shift + Z</kbd>: Redo surgery</li>
+        </ul>
+      </div>
     </div>
   );
 }

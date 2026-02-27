@@ -9,23 +9,23 @@ export function CustomNode({ data, selected }: any) {
   const isHighlighted: boolean = data.isHighlighted;
   const isDimmed: boolean = data.isDimmed;
 
-  let borderColor = '#666';
+  let borderColor = 'var(--vscode-editorBracketMatch-border1, #666)';
   let borderStyle = 'solid';
-  if (selected) borderColor = '#007acc';
-  if (isHighlighted) borderColor = '#f0a30a';
-  if (hasLora && !data.comparisonStatus) borderColor = '#89d185';
+  if (selected) borderColor = 'var(--vscode-editorBracketMatch-border2, #007acc)';
+  if (isHighlighted) borderColor = 'var(--vscode-editorWarning-foreground, #f0a30a)';
+  if (hasLora && !data.comparisonStatus) borderColor = 'var(--vscode-testing-iconPassed, #89d185)';
 
   const comparisonStatus = data.comparisonStatus;
   if (comparisonStatus) {
     if (comparisonStatus.status === 'onlyA' || comparisonStatus.status === 'onlyB') {
       borderStyle = 'dashed';
-      borderColor = '#888';
+      borderColor = 'var(--vscode-descriptionForeground, #888)';
     } else if (data.diffMetrics) {
       // gradient from green (sim ~ 1.0) to red (sim < 0.5)
       const sim = data.diffMetrics.cosineSimilarity;
-      if (sim > 0.99) borderColor = '#28a745'; // green
-      else if (sim > 0.8) borderColor = '#ffc107'; // yellow
-      else borderColor = '#dc3545'; // red
+      if (sim > 0.99) borderColor = 'var(--vscode-testing-iconPassed, #28a745)'; // green
+      else if (sim > 0.8) borderColor = 'var(--vscode-testing-iconQueued, #ffc107)'; // yellow
+      else borderColor = 'var(--vscode-testing-iconFailed, #dc3545)'; // red
     }
   }
 
@@ -35,6 +35,9 @@ export function CustomNode({ data, selected }: any) {
   if (!isExpanded || node.type === 'parameter' || node.children.length === 0) {
     return (
       <div
+        role="button"
+        tabIndex={0}
+        aria-label={`${node.type} ${node.name}${node.tensorInfo ? `, shape ${node.tensorInfo.shape.join(' by ')}, ${node.tensorInfo.dtype}` : ''}${hasLora ? ', has LoRA adapter' : ''}`}
         style={{
           width: '100%',
           height: '100%',
@@ -85,6 +88,9 @@ export function CustomNode({ data, selected }: any) {
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Expanded ${node.type} ${node.name}`}
       style={{
         width: '100%',
         height: '100%',

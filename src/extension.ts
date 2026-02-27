@@ -10,6 +10,7 @@ import { MessageHost } from './protocol/messageHost';
 import { PROTOCOL_VERSION } from './types/messages';
 import { SurgerySession } from './surgery/SurgerySession';
 import { UnifiedTensorMap } from './types/safetensors';
+import { Logger } from './utils/logger';
 
 let workerPool: WorkerPool | undefined;
 let currentPanel: vscode.WebviewPanel | undefined;
@@ -29,6 +30,9 @@ let currentModelB: {
 } | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
+  Logger.initialize();
+  Logger.log('Model Surgeon activated', 'Lifecycle');
+  
   workerPool = new WorkerPool(2);
 
   const openModelCmd = vscode.commands.registerCommand(
@@ -181,6 +185,7 @@ async function openModel(filePath: string, context: vscode.ExtensionContext) {
         updatedTree: newTree,
       });
     } catch (err: unknown) {
+      Logger.error(`Surgery operation failed: ${msg.operation?.operationType}`, err);
       messageHost.postMessage({
         type: 'surgeryResult',
         protocolVersion: PROTOCOL_VERSION,
@@ -257,6 +262,8 @@ async function loadAndSendModel(filePath: string, messageHost: MessageHost) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    Logger.error(`Failed to load model from ${filePath}`, err);
+    vscode.window.showErrorMessage(`Model Surgeon: Failed to load model from ${filePath}. ${message}`);
     messageHost.postMessage({
       type: 'error',
       protocolVersion: PROTOCOL_VERSION,
@@ -330,6 +337,8 @@ async function loadAndCompareModel(filePath: string, messageHost: MessageHost) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    Logger.error(`Failed to load comparison model from ${filePath}`, err);
+    vscode.window.showErrorMessage(`Model Surgeon: Failed to load comparison model from ${filePath}. ${message}`);
     messageHost.postMessage({
       type: 'error',
       protocolVersion: PROTOCOL_VERSION,
