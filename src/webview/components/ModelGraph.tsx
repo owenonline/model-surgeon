@@ -64,13 +64,15 @@ function ModelGraphInner({ tree, loraMap, comparison, onLoadStats }: ModelGraphP
     setExpandedNodes(new Set());
   }, []);
 
-  const handleNodeDoubleClick: NodeMouseHandler = useCallback((event, node) => {
+  const handleNodeDoubleClick: NodeMouseHandler = useCallback((_event, node) => {
+    const fullPath = node.data?.node?.fullPath as string | undefined;
+    if (!fullPath) return;
     setExpandedNodes(prev => {
       const next = new Set(prev);
-      if (next.has(node.id)) {
-        next.delete(node.id);
+      if (next.has(fullPath)) {
+        next.delete(fullPath);
       } else {
-        next.add(node.id);
+        next.add(fullPath);
       }
       return next;
     });
@@ -93,7 +95,8 @@ function ModelGraphInner({ tree, loraMap, comparison, onLoadStats }: ModelGraphP
     );
     setNodes(data.nodes);
     setEdges(data.edges);
-  }, [tree, loraMap, expandedNodes, searchQuery, filterDtype, filterLora, filterMode, comparison, setNodes, setEdges]);
+    requestAnimationFrame(() => fitView({ duration: 300 }));
+  }, [tree, loraMap, expandedNodes, searchQuery, filterDtype, filterLora, filterMode, comparison, setNodes, setEdges, fitView]);
 
   // Find selected node details
   const selectedNodeData = useMemo(() => {
@@ -128,20 +131,28 @@ function ModelGraphInner({ tree, loraMap, comparison, onLoadStats }: ModelGraphP
             onNodeDoubleClick={handleNodeDoubleClick}
             onNodeClick={handleNodeClick}
             fitView
-            attributionPosition="bottom-right"
+            fitViewOptions={{ padding: 0.2 }}
+            panOnDrag
+            zoomOnScroll
+            zoomOnPinch
+            zoomOnDoubleClick={false}
+            panOnScroll={false}
+            nodesDraggable={false}
+            nodesConnectable={false}
+            elementsSelectable
+            minZoom={0.02}
+            maxZoom={4}
+            defaultViewport={{ x: 0, y: 0, zoom: 0.5 }}
           >
-            <Background color="#ccc" gap={16} />
-            <Controls />
-            <MiniMap 
-              nodeStrokeColor={(n: any) => {
+            <Background color="#444" gap={20} size={1} />
+            <Controls showInteractive={false} />
+            <MiniMap
+              nodeStrokeWidth={0}
+              nodeColor={(n: any) => {
                 if (n.data?.hasLora) return '#89d185';
-                if (n.data?.isHighlighted) return '#f0a30a';
                 return '#666';
               }}
-              nodeColor={(n: any) => {
-                return n.data?.isExpanded ? 'rgba(128,128,128,0.1)' : 'var(--vscode-editor-background)';
-              }}
-              maskColor="rgba(0, 0, 0, 0.2)"
+              maskColor="rgba(0, 0, 0, 0.5)"
             />
           </ReactFlow>
         </div>

@@ -352,6 +352,9 @@ function getWebviewContent(webview: vscode.Webview, context: vscode.ExtensionCon
   const scriptUri = webview.asWebviewUri(
     vscode.Uri.file(path.join(context.extensionPath, 'dist', 'webview', 'main.js')),
   );
+  const cssUri = webview.asWebviewUri(
+    vscode.Uri.file(path.join(context.extensionPath, 'dist', 'webview', 'main.css')),
+  );
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -361,6 +364,19 @@ function getWebviewContent(webview: vscode.Webview, context: vscode.ExtensionCon
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'none'; script-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline';">
   <title>Model Surgeon</title>
+  <link rel="stylesheet" href="${cssUri}">
+  <style>
+    html, body, #root {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background-color: var(--vscode-editor-background);
+      color: var(--vscode-editor-foreground);
+      font-family: var(--vscode-font-family);
+    }
+  </style>
 </head>
 <body>
   <div id="root"></div>

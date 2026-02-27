@@ -57,10 +57,8 @@ describe('Graph Builder', () => {
     expect(ids).toContain('A-layer1.attn');
     expect(ids).toContain('A-layer1.attn.weight');
     
-    // layer1.attn is inside layer1, layer1.attn.weight is inside layer1.attn
-    // Our layout generates edges for siblings.
-    // In this simple tree, there are no siblings, so 0 edges.
-    expect(edges.length).toBe(0);
+    // layer1 -> layer1.attn -> layer1.attn.weight = 2 edges
+    expect(edges.length).toBe(2);
   });
 
   it('handles search queries (highlight)', () => {
@@ -92,7 +90,15 @@ describe('Graph Builder', () => {
   });
 
   it('handles LoRA filtering', () => {
-    const loraMap = { 'layer1.attn.weight': { r: 8, alpha: 16 } };
+    const loraMap = {
+      'layer1.attn': [{
+        adapterName: 'default',
+        baseTensorName: 'layer1.attn.weight',
+        loraAName: 'layer1.attn.lora_A.weight',
+        loraBName: 'layer1.attn.lora_B.weight',
+        rank: 8, alpha: 16, aShape: [8, 1024], bShape: [1024, 8],
+      }],
+    };
     const expandedNodes = new Set<string>(['layer1', 'layer1.attn']);
     
     // filterLora = true

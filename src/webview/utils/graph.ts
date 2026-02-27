@@ -1,4 +1,5 @@
-import { Node, Edge } from 'reactflow';
+import { Node, Edge, MarkerType } from 'reactflow';
+import dagre from 'dagre';
 import { ArchitectureNode } from '../../types/tree';
 import { LoraAdapterMap } from '../../types/lora';
 import { AlignedComponent } from '../../types/messages';
@@ -8,10 +9,115 @@ export interface GraphData {
   edges: Edge[];
 }
 
-const PADDING = 20;
-const PARAM_HEIGHT = 50;
-const PARAM_WIDTH = 250;
-const HEADER_HEIGHT = 40;
+const NODE_WIDTH = 260;
+const NODE_HEIGHT = 64;
+const BLOCK_NODE_HEIGHT = 48;
+const RANK_SEP = 60;
+const NODE_SEP = 30;
+
+function countDescendants(node: ArchitectureNode): number {
+  let count = 0;
+  for (const c of node.children) {
+    count += 1 + countDescendants(c);
+  }
+  return count;
+}
+
+function collectVisibleNodes(
+  node: ArchitectureNode,
+  expandedNodes: Set<string>,
+  loraMap: LoraAdapterMap,
+  searchQuery: string,
+  filterDtype: string,
+  filterLora: boolean,
+  filterMode: 'highlight' | 'isolate',
+  modelId: 'A' | 'B',
+  comparison: { alignedComponents: AlignedComponent[] } | undefined,
+  result: { nodes: Array<{ id: string; data: Record<string, unknown>; width: number; height: number }>; edges: Array<{ source: string; target: string }> },
+  parentPath: string | null,
+): boolean {
+  const isExpanded = expandedNodes.has(node.fullPath);
+  const hasL = hasLoraDown(node, loraMap);
+
+  const matchSearch = !searchQuery || node.fullPath.toLowerCase().includes(searchQuery.toLowerCase());
+  const matchSearchDown = matchSearch || node.children.some((c) => matchesSearchDown(c, searchQuery));
+
+  if (filterMode === 'isolate' && searchQuery && !matchSearch && !matchSearchDown) {
+    return false;
+  }
+
+  let matchFilter = true;
+  if (filterDtype && filterDtype !== 'all' && node.type === 'parameter' && node.tensorInfo?.dtype !== filterDtype) {
+    matchFilter = false;
+  }
+  if (filterLora && !hasL) {
+    matchFilter = false;
+  }
+  if (filterMode === 'isolate' && !matchFilter) {
+    return false;
+  }
+
+  const isDimmed = (searchQuery && filterMode === 'highlight' && !matchSearch) || (!matchFilter && filterMode === 'highlight');
+
+  let comparisonStatus: AlignedComponent | undefined;
+  if (comparison) {
+    const canonical = node.fullPath.replace(/^base_model\.model\./, '');
+    comparisonStatus = comparison.alignedComponents.find((c) => c.path === canonical);
+  }
+
+  const isLeafOrCollapsed = !isExpanded || node.type === 'parameter' || node.children.length === 0;
+  const descendantCount = countDescendants(node);
+
+  const nodeId = `${modelId}-${node.fullPath}`;
+  const height = node.type === 'parameter' ? NODE_HEIGHT : BLOCK_NODE_HEIGHT;
+
+  result.nodes.push({
+    id: nodeId,
+    width: NODE_WIDTH,
+    height,
+    data: {
+      label: node.name,
+      node,
+      modelId,
+      isExpanded,
+      hasLora: hasL,
+      loraAdapters: node.adapters
+        ? Object.values(node.adapters)
+        : loraMap[node.fullPath] ?? [],
+      isHighlighted: searchQuery ? matchSearch : false,
+      isDimmed,
+      comparisonStatus,
+      descendantCount,
+      isLeafOrCollapsed,
+    },
+  });
+
+  if (parentPath !== null) {
+    result.edges.push({
+      source: `${modelId}-${parentPath}`,
+      target: nodeId,
+    });
+  }
+
+  if (!isLeafOrCollapsed) {
+    for (const child of node.children) {
+      collectVisibleNodes(child, expandedNodes, loraMap, searchQuery, filterDtype, filterLora, filterMode, modelId, comparison, result, node.fullPath);
+    }
+  }
+
+  return true;
+}
+
+function hasLoraDown(node: ArchitectureNode, lMap: LoraAdapterMap): boolean {
+  if (lMap[node.fullPath]?.length) return true;
+  if (node.adapters && Object.keys(node.adapters).length > 0) return true;
+  return node.children.some((c) => hasLoraDown(c, lMap));
+}
+
+function matchesSearchDown(node: ArchitectureNode, query: string): boolean {
+  if (node.fullPath.toLowerCase().includes(query.toLowerCase())) return true;
+  return node.children.some((c) => matchesSearchDown(c, query));
+}
 
 export function buildGraph(
   rootNode: ArchitectureNode,
@@ -25,182 +131,94 @@ export function buildGraph(
     treeB: ArchitectureNode;
     loraMapB: LoraAdapterMap;
     alignedComponents: AlignedComponent[];
-  }
+  },
 ): GraphData {
-  const nodes: Node[] = [];
-  const edges: Edge[] = [];
+  const collected = {
+    nodes: [] as Array<{ id: string; data: Record<string, unknown>; width: number; height: number }>,
+    edges: [] as Array<{ source: string; target: string }>,
+  };
 
-  function hasLoraDown(node: ArchitectureNode, lMap: LoraAdapterMap): boolean {
-    if (lMap[node.fullPath]) return true;
-    if (node.adapters && Object.keys(node.adapters).length > 0) return true;
-    return node.children.some(c => hasLoraDown(c, lMap));
-  }
-
-  function matchesSearch(node: ArchitectureNode): boolean {
-    if (!searchQuery) return true;
-    return node.fullPath.toLowerCase().includes(searchQuery.toLowerCase());
-  }
-
-  function matchesFilters(node: ArchitectureNode, lMap: LoraAdapterMap): boolean {
-    let match = true;
-    if (filterDtype && filterDtype !== 'all') {
-      if (node.type === 'parameter' && node.tensorInfo?.dtype !== filterDtype) {
-        match = false;
-      }
-    }
-    if (filterLora && !hasLoraDown(node, lMap)) {
-      match = false;
-    }
-    return match;
-  }
-
-  function matchesSearchDown(node: ArchitectureNode): boolean {
-    if (matchesSearch(node)) return true;
-    return node.children.some(matchesSearchDown);
-  }
-
-  function calculateLayout(
-    node: ArchitectureNode,
-    lMap: LoraAdapterMap,
-    modelId: 'A' | 'B',
-    parentId: string | null = null,
-    offsetX: number = 0,
-    offsetY: number = 0
-  ): { width: number; height: number } {
-    const isExpanded = expandedNodes.has(node.fullPath);
-    const hasL = hasLoraDown(node, lMap);
-
-    let isHighlighted = false;
-    let isDimmed = false;
-
-    if (searchQuery) {
-      isHighlighted = matchesSearch(node);
-      isDimmed = filterMode === 'highlight' && !isHighlighted;
-      if (filterMode === 'isolate' && !isHighlighted && !matchesSearchDown(node)) {
-        return { width: 0, height: 0 };
-      }
-    }
-
-    if (!matchesFilters(node, lMap)) {
-      isDimmed = true;
-      if (filterMode === 'isolate') return { width: 0, height: 0 };
-    }
-
-    let comparisonStatus = undefined;
-    if (comparison) {
-      const canonical = node.fullPath.replace(/^base_model\.model\./, '');
-      const aligned = comparison.alignedComponents.find(c => c.path === canonical);
-      if (aligned) {
-        comparisonStatus = aligned;
-      }
-    }
-
-    const n: Node = {
-      id: `${modelId}-${node.fullPath}`,
-      type: 'customNode',
-      position: { x: offsetX, y: offsetY },
-      data: {
-        label: node.name,
-        node,
-        modelId,
-        isExpanded,
-        hasLora: hasL,
-        loraAdapters: node.adapters ? Object.values(node.adapters) : (lMap[node.fullPath] ? [lMap[node.fullPath]] : []),
-        isHighlighted,
-        isDimmed,
-        comparisonStatus,
-      },
-      parentNode: parentId ? `${modelId}-${parentId}` : undefined,
-      style: { width: PARAM_WIDTH, height: PARAM_HEIGHT },
-    };
-
-    if (!isExpanded || node.type === 'parameter' || node.children.length === 0) {
-      // Collapsed or leaf node
-      n.style = { width: PARAM_WIDTH, height: PARAM_HEIGHT };
-      nodes.push(n);
-      return { width: PARAM_WIDTH, height: PARAM_HEIGHT };
-    }
-
-    // Expanded node layout
-    let currentY = HEADER_HEIGHT;
-    let maxWidth = PARAM_WIDTH;
-
-    for (let i = 0; i < node.children.length; i++) {
-      const child = node.children[i];
-      const size = calculateLayout(child, lMap, modelId, node.fullPath, PADDING, currentY);
-      
-      if (size.height > 0) {
-        if (i > 0) {
-          const prevChild = node.children[i - 1];
-          edges.push({
-            id: `e-${modelId}-${prevChild.fullPath}-${child.fullPath}`,
-            source: `${modelId}-${prevChild.fullPath}`,
-            target: `${modelId}-${child.fullPath}`,
-            type: 'smoothstep',
-          });
-        }
-        currentY += size.height + PADDING;
-        maxWidth = Math.max(maxWidth, size.width + PADDING * 2);
-      }
-    }
-
-    const finalWidth = maxWidth;
-    const finalHeight = currentY;
-
-    n.style = { width: finalWidth, height: finalHeight, backgroundColor: 'rgba(0,0,0,0.05)', border: '1px solid #ccc' };
-    nodes.push(n);
-    
-    return { width: finalWidth, height: finalHeight };
-  }
-
-  let rootY_A = 0;
-  let maxW_A = 0;
   for (const child of rootNode.children) {
-    const size = calculateLayout(child, loraMap, 'A', null, 0, rootY_A);
-    if (size.height > 0) {
-      rootY_A += size.height + 50;
-      maxW_A = Math.max(maxW_A, size.width);
-    }
-  }
-
-  for (let i = 0; i < rootNode.children.length - 1; i++) {
-    edges.push({
-      id: `e-root-A-${i}`,
-      source: `A-${rootNode.children[i].fullPath}`,
-      target: `A-${rootNode.children[i+1].fullPath}`,
-      type: 'smoothstep'
-    });
+    collectVisibleNodes(child, expandedNodes, loraMap, searchQuery, filterDtype, filterLora, filterMode, 'A', comparison, collected, null);
   }
 
   if (comparison) {
-    let rootY_B = 0;
-    const offsetB = maxW_A + 500; // Place B to the right of A
     for (const child of comparison.treeB.children) {
-      const size = calculateLayout(child, comparison.loraMapB, 'B', null, offsetB, rootY_B);
-      if (size.height > 0) {
-        rootY_B += size.height + 50;
-      }
+      collectVisibleNodes(child, expandedNodes, comparison.loraMapB, searchQuery, filterDtype, filterLora, filterMode, 'B', comparison, collected, null);
     }
+  }
 
-    for (let i = 0; i < comparison.treeB.children.length - 1; i++) {
-      edges.push({
-        id: `e-root-B-${i}`,
-        source: `B-${comparison.treeB.children[i].fullPath}`,
-        target: `B-${comparison.treeB.children[i+1].fullPath}`,
-        type: 'smoothstep'
-      });
+  const g = new dagre.graphlib.Graph();
+  g.setDefaultEdgeLabel(() => ({}));
+  g.setGraph({ rankdir: 'TB', ranksep: RANK_SEP, nodesep: NODE_SEP, marginx: 40, marginy: 40 });
+
+  for (const n of collected.nodes) {
+    g.setNode(n.id, { width: n.width, height: n.height });
+  }
+  for (const e of collected.edges) {
+    g.setEdge(e.source, e.target);
+  }
+
+  dagre.layout(g);
+
+  let offsetB = 0;
+  if (comparison) {
+    let maxXA = 0;
+    let minXB = Infinity;
+    for (const n of collected.nodes) {
+      const pos = g.node(n.id);
+      if (!pos) continue;
+      const mid = n.id.startsWith('A-') ? 'A' : 'B';
+      if (mid === 'A') maxXA = Math.max(maxXA, pos.x + n.width / 2);
+      if (mid === 'B') minXB = Math.min(minXB, pos.x - n.width / 2);
     }
+    if (minXB < maxXA + 300) {
+      offsetB = maxXA + 300 - minXB;
+    }
+  }
 
-    // Connect matched nodes between A and B
+  const nodes: Node[] = collected.nodes.map((n) => {
+    const pos = g.node(n.id);
+    const isB = n.id.startsWith('B-');
+    return {
+      id: n.id,
+      type: 'customNode',
+      position: {
+        x: (pos?.x ?? 0) - n.width / 2 + (isB ? offsetB : 0),
+        y: (pos?.y ?? 0) - n.height / 2,
+      },
+      data: n.data,
+      style: { width: n.width, height: n.height },
+    };
+  });
+
+  const edgeColor = 'var(--vscode-editorWidget-border, #555)';
+  const edges: Edge[] = collected.edges.map((e, i) => ({
+    id: `e-${i}`,
+    source: e.source,
+    target: e.target,
+    type: 'smoothstep',
+    animated: false,
+    style: { stroke: edgeColor, strokeWidth: 1.5 },
+    markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12, color: edgeColor },
+  }));
+
+  if (comparison) {
     for (const align of comparison.alignedComponents) {
       if (align.status === 'matched') {
-        edges.push({
-          id: `match-${align.path}`,
-          source: `A-${align.path}`,
-          target: `B-${align.path}`,
-          type: 'straight',
-          style: { stroke: '#888', strokeDasharray: '5 5' }
-        });
+        const sourceId = `A-${align.path}`;
+        const targetId = `B-${align.path}`;
+        const hasSource = collected.nodes.some((n) => n.id === sourceId);
+        const hasTarget = collected.nodes.some((n) => n.id === targetId);
+        if (hasSource && hasTarget) {
+          edges.push({
+            id: `match-${align.path}`,
+            source: sourceId,
+            target: targetId,
+            type: 'straight',
+            style: { stroke: 'var(--vscode-descriptionForeground, #888)', strokeDasharray: '6 4', strokeWidth: 1 },
+          });
+        }
       }
     }
   }

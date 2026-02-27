@@ -32,18 +32,15 @@ describe('R105 -- Model Architecture Tree Builder', () => {
     expect(tree.type).toBe('root');
     expect(tree.children.length).toBeGreaterThanOrEqual(2);
 
-    // Layer 0 should exist
     const layer0 = findNode(tree, 'model.layers.0');
     expect(layer0).toBeDefined();
     expect(layer0!.type).toBe('block');
     expect(layer0!.blockIndex).toBe(0);
 
-    // Layer 1 should exist
     const layer1 = findNode(tree, 'model.layers.1');
     expect(layer1).toBeDefined();
     expect(layer1!.blockIndex).toBe(1);
 
-    // Check parameter leaf
     const qProj = findNode(tree, 'model.layers.0.self_attn.q_proj.weight');
     expect(qProj).toBeDefined();
     expect(qProj!.type).toBe('parameter');
@@ -73,7 +70,7 @@ describe('R105 -- Model Architecture Tree Builder', () => {
     expect(h1!.blockIndex).toBe(1);
   });
 
-  it('attaches LoRA adapters to parent component, not as tree children', () => {
+  it('attaches LoRA adapters to parent component, keyed by adapter name', () => {
     const tensors: Record<string, TensorInfo> = {
       'model.layers.0.self_attn.q_proj.weight': { dtype: 'F16', shape: [4096, 4096], dataOffsets: [0, 100] },
       'model.layers.0.self_attn.q_proj.lora_A.weight': { dtype: 'F16', shape: [8, 4096], dataOffsets: [100, 200] },
@@ -81,7 +78,8 @@ describe('R105 -- Model Architecture Tree Builder', () => {
     };
 
     const loraMap: LoraAdapterMap = {
-      'model.layers.0.self_attn.q_proj.weight': {
+      'model.layers.0.self_attn.q_proj': [{
+        adapterName: 'default',
         baseTensorName: 'model.layers.0.self_attn.q_proj.weight',
         loraAName: 'model.layers.0.self_attn.q_proj.lora_A.weight',
         loraBName: 'model.layers.0.self_attn.q_proj.lora_B.weight',
@@ -89,7 +87,7 @@ describe('R105 -- Model Architecture Tree Builder', () => {
         alpha: 16,
         aShape: [8, 4096],
         bShape: [4096, 8],
-      },
+      }],
     };
 
     const tree = buildArchitectureTree(tensors, loraMap);
@@ -98,13 +96,51 @@ describe('R105 -- Model Architecture Tree Builder', () => {
     const loraANode = findNode(tree, 'model.layers.0.self_attn.q_proj.lora_A.weight');
     expect(loraANode).toBeUndefined();
 
-    // The parent component should have adapters attached
+    // The component node should have adapters attached, keyed by adapter name
     const qProjComponent = findNode(tree, 'model.layers.0.self_attn.q_proj');
     expect(qProjComponent).toBeDefined();
     expect(qProjComponent!.adapters).toBeDefined();
-    expect(
-      qProjComponent!.adapters!['model.layers.0.self_attn.q_proj.weight'],
-    ).toBeDefined();
+    expect(qProjComponent!.adapters!['default']).toBeDefined();
+    expect(qProjComponent!.adapters!['default'].rank).toBe(8);
+  });
+
+  it('attaches named adapters (read_adapter / write_adapter) correctly', () => {
+    const tensors: Record<string, TensorInfo> = {
+      'backbone.layers.0.q_proj.base_layer.weight': { dtype: 'BF16', shape: [4096, 4096], dataOffsets: [0, 100] },
+      'backbone.layers.0.q_proj.lora_A.read_adapter.weight': { dtype: 'BF16', shape: [8, 4096], dataOffsets: [100, 200] },
+      'backbone.layers.0.q_proj.lora_B.read_adapter.weight': { dtype: 'BF16', shape: [4096, 8], dataOffsets: [200, 300] },
+      'backbone.layers.0.q_proj.lora_A.write_adapter.weight': { dtype: 'BF16', shape: [16, 4096], dataOffsets: [300, 400] },
+      'backbone.layers.0.q_proj.lora_B.write_adapter.weight': { dtype: 'BF16', shape: [4096, 16], dataOffsets: [400, 500] },
+    };
+
+    const loraMap: LoraAdapterMap = {
+      'backbone.layers.0.q_proj': [
+        {
+          adapterName: 'read_adapter',
+          baseTensorName: 'backbone.layers.0.q_proj.base_layer.weight',
+          loraAName: 'backbone.layers.0.q_proj.lora_A.read_adapter.weight',
+          loraBName: 'backbone.layers.0.q_proj.lora_B.read_adapter.weight',
+          rank: 8, alpha: null, aShape: [8, 4096], bShape: [4096, 8],
+        },
+        {
+          adapterName: 'write_adapter',
+          baseTensorName: 'backbone.layers.0.q_proj.base_layer.weight',
+          loraAName: 'backbone.layers.0.q_proj.lora_A.write_adapter.weight',
+          loraBName: 'backbone.layers.0.q_proj.lora_B.write_adapter.weight',
+          rank: 16, alpha: null, aShape: [16, 4096], bShape: [4096, 16],
+        },
+      ],
+    };
+
+    const tree = buildArchitectureTree(tensors, loraMap);
+
+    const qProjNode = findNode(tree, 'backbone.layers.0.q_proj');
+    expect(qProjNode).toBeDefined();
+    expect(qProjNode!.adapters).toBeDefined();
+    expect(Object.keys(qProjNode!.adapters!)).toHaveLength(2);
+    expect(qProjNode!.adapters!['read_adapter']).toBeDefined();
+    expect(qProjNode!.adapters!['write_adapter']).toBeDefined();
+    expect(qProjNode!.adapters!['write_adapter'].rank).toBe(16);
   });
 
   it('produces deterministic ordering: blocks by index, others alphabetically', () => {
@@ -121,10 +157,8 @@ describe('R105 -- Model Architecture Tree Builder', () => {
     expect(modelNode).toBeDefined();
 
     const childNames = modelNode!.children.map((c) => c.name);
-    // Numbered blocks first (sorted by index), then alpha
     expect(childNames).toEqual(['embed', 'layers', 'norm']);
 
-    // Within 'layers', blocks should be sorted 0, 1, 2
     const layersNode = findNode(tree, 'model.layers');
     expect(layersNode).toBeDefined();
     const layerIndices = layersNode!.children.map((c) => c.blockIndex);

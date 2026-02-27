@@ -3,76 +3,97 @@ import * as path from 'path';
 import { TensorInfo } from '../types/safetensors';
 import { LoraAdapterMap, LoraAdapterPair, AdapterConfig } from '../types/lora';
 
-const LORA_A_SUFFIX = '.lora_A.weight';
-const LORA_B_SUFFIX = '.lora_B.weight';
+/**
+ * Regex patterns for LoRA tensor names. Handles two conventions:
+ *
+ * 1. Standard PEFT:  *.lora_A.weight / *.lora_B.weight
+ * 2. Named adapters: *.lora_A.<adapter_name>.weight / *.lora_B.<adapter_name>.weight
+ *
+ * Captures: [full match, module_path, "A"|"B", adapter_name|undefined]
+ */
+const LORA_PATTERN = /^(.+)\.lora_(A|B)(?:\.([^.]+))?\.weight$/;
+const BASE_LAYER_PATTERN = /^(.+)\.base_layer\.weight$/;
 const PEFT_PREFIX = 'base_model.model.';
 
-/**
- * R104: Detect LoRA adapter tensors and associate A/B pairs with base tensors.
- */
 export function detectLoraAdapters(
   tensors: Record<string, TensorInfo>,
   adapterConfig?: AdapterConfig | null,
 ): LoraAdapterMap {
-  const loraATensors = new Map<string, { name: string; info: TensorInfo }>();
-  const loraBTensors = new Map<string, { name: string; info: TensorInfo }>();
+  // Collect all LoRA tensors grouped by (modulePath, adapterName)
+  const loraEntries = new Map<
+    string,
+    { a?: { name: string; info: TensorInfo }; b?: { name: string; info: TensorInfo } }
+  >();
+
+  const baseLayerPaths = new Set<string>();
 
   for (const [name, info] of Object.entries(tensors)) {
-    if (name.endsWith(LORA_A_SUFFIX)) {
-      const baseName = resolveBaseTensorName(name, LORA_A_SUFFIX);
-      loraATensors.set(baseName, { name, info });
-    } else if (name.endsWith(LORA_B_SUFFIX)) {
-      const baseName = resolveBaseTensorName(name, LORA_B_SUFFIX);
-      loraBTensors.set(baseName, { name, info });
+    const match = LORA_PATTERN.exec(name);
+    if (match) {
+      const modulePath = match[1];
+      const ab = match[2]; // "A" or "B"
+      const adapterName = match[3] ?? 'default';
+      const key = `${modulePath}||${adapterName}`;
+
+      let entry = loraEntries.get(key);
+      if (!entry) {
+        entry = {};
+        loraEntries.set(key, entry);
+      }
+      if (ab === 'A') entry.a = { name, info };
+      else entry.b = { name, info };
+      continue;
+    }
+
+    const baseMatch = BASE_LAYER_PATTERN.exec(name);
+    if (baseMatch) {
+      baseLayerPaths.add(baseMatch[1]);
     }
   }
 
   const adapterMap: LoraAdapterMap = {};
 
-  for (const [baseName, aInfo] of loraATensors) {
-    const bInfo = loraBTensors.get(baseName);
-    if (!bInfo) {
-      continue; // Orphan lora_A without matching lora_B
+  for (const [key, entry] of loraEntries) {
+    if (!entry.a || !entry.b) continue;
+
+    const [modulePath, adapterName] = key.split('||');
+
+    let baseTensorName: string;
+    if (baseLayerPaths.has(modulePath)) {
+      baseTensorName = `${modulePath}.base_layer.weight`;
+    } else {
+      let stripped = modulePath;
+      if (stripped.startsWith(PEFT_PREFIX)) {
+        stripped = stripped.slice(PEFT_PREFIX.length);
+      }
+      baseTensorName = `${stripped}.weight`;
     }
 
+    // Use modulePath as the key for grouping (stable across adapter names)
+    const groupKey = modulePath;
+
     const pair: LoraAdapterPair = {
-      baseTensorName: baseName,
-      loraAName: aInfo.name,
-      loraBName: bInfo.name,
-      rank: adapterConfig?.r ?? inferRank(aInfo.info.shape, bInfo.info.shape),
+      baseTensorName,
+      adapterName,
+      loraAName: entry.a.name,
+      loraBName: entry.b.name,
+      rank: adapterConfig?.r ?? inferRank(entry.a.info.shape, entry.b.info.shape),
       alpha: adapterConfig?.lora_alpha ?? null,
-      aShape: aInfo.info.shape,
-      bShape: bInfo.info.shape,
+      aShape: entry.a.info.shape,
+      bShape: entry.b.info.shape,
     };
 
-    adapterMap[baseName] = pair;
+    if (!adapterMap[groupKey]) {
+      adapterMap[groupKey] = [];
+    }
+    adapterMap[groupKey].push(pair);
   }
 
   return adapterMap;
 }
 
-/**
- * Strip LoRA suffix and PEFT prefix to recover the base tensor name.
- */
-function resolveBaseTensorName(loraName: string, suffix: string): string {
-  let baseName = loraName.slice(0, -suffix.length);
-
-  // Strip PEFT prefix if present
-  if (baseName.startsWith(PEFT_PREFIX)) {
-    baseName = baseName.slice(PEFT_PREFIX.length);
-  }
-
-  // Re-add .weight suffix since we stripped .lora_A.weight / .lora_B.weight
-  return baseName + '.weight';
-}
-
-/**
- * Infer LoRA rank from A and B shapes.
- * A shape is typically [rank, in_features], B shape is [out_features, rank].
- */
 function inferRank(aShape: number[], bShape: number[]): number | null {
   if (aShape.length >= 2 && bShape.length >= 2) {
-    // A: [rank, in], B: [out, rank] — rank is A[0] and B[1]
     if (aShape[0] === bShape[bShape.length - 1]) {
       return aShape[0];
     }
@@ -80,9 +101,6 @@ function inferRank(aShape: number[], bShape: number[]): number | null {
   return null;
 }
 
-/**
- * Parse adapter_config.json if it exists near the safetensors files.
- */
 export async function parseAdapterConfig(
   safetensorsPath: string,
 ): Promise<AdapterConfig | null> {
@@ -104,9 +122,6 @@ export async function parseAdapterConfig(
   }
 }
 
-/**
- * Parse adapter_config.json from a specified directory path.
- */
 export async function parseAdapterConfigFromDir(
   dirPath: string,
 ): Promise<AdapterConfig | null> {

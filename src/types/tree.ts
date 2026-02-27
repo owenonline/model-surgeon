@@ -12,7 +12,7 @@ export interface ArchitectureNode {
     dtype: SafetensorsDtype;
     shape: number[];
   };
-  /** LoRA adapters attached to this component (keyed by base tensor name). */
+  /** LoRA adapters attached to this component (keyed by adapter name e.g. "default", "read_adapter"). */
   adapters?: Record<string, LoraAdapterPair>;
   /** For block nodes: the numeric index if this is a numbered layer. */
   blockIndex?: number;

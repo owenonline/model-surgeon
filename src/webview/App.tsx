@@ -21,6 +21,7 @@ export function App() {
       setTree(msg.tree);
       setLoraMap(msg.loraMap);
       setLoading(false);
+      setProgress(null);
       setError(null);
     },
     error: (msg) => {
@@ -47,6 +48,7 @@ export function App() {
         setError(msg.error);
       }
       setLoading(false);
+      setProgress(null);
     },
   });
 
