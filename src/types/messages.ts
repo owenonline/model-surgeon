@@ -88,16 +88,63 @@ export interface ProgressMessage {
   percent: number;
 }
 
+// ─── On-demand diff messages ──────────────────────────────────────────────────
+
+/** Webview → Extension: compute diff for a single parameter tensor. */
+export interface RequestTensorDiffMessage {
+  type: 'requestTensorDiff';
+  protocolVersion: number;
+  /** Canonical tensor path (as stored in AlignedComponent.path). */
+  path: string;
+}
+
+/** Extension → Webview: result for a single tensor diff. */
+export interface TensorDiffResultMessage {
+  type: 'tensorDiffResult';
+  protocolVersion: number;
+  path: string;
+  metrics: TensorDiffMetrics | null;
+  /** First N float values from model A (flat, regardless of shape). */
+  previewA: number[];
+  /** First N float values from model B. */
+  previewB: number[];
+  /** Tensor shape for labelling the preview. */
+  shape: number[];
+  error?: string;
+}
+
+/** Webview → Extension: compute diffs for a set of parameter tensors (module view). */
+export interface RequestModuleDiffMessage {
+  type: 'requestModuleDiff';
+  protocolVersion: number;
+  paths: string[];
+}
+
+/** Extension → Webview: batch diff results for a module. */
+export interface ModuleDiffResultMessage {
+  type: 'moduleDiffResult';
+  protocolVersion: number;
+  results: Array<{
+    path: string;
+    metrics: TensorDiffMetrics | null;
+    error?: string;
+  }>;
+}
+
 export type ExtensionToWebviewMessage =
   | ModelLoadedMessage
   | ComparisonResultMessage
   | SurgeryResultMessage
   | ErrorMessage
-  | ProgressMessage;
+  | ProgressMessage
+  | TensorDiffResultMessage
+  | ModuleDiffResultMessage;
 
 export type WebviewToExtensionMessage =
   | LoadModelMessage
   | LoadComparisonMessage
-  | PerformSurgeryMessage;
+  | PerformSurgeryMessage
+  | RequestTensorDiffMessage
+  | RequestModuleDiffMessage;
 
 export type AnyMessage = ExtensionToWebviewMessage | WebviewToExtensionMessage;

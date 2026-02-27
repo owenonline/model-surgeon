@@ -1,27 +1,40 @@
 import React, {
   useState,
   useCallback,
+  useContext,
   useRef,
   useMemo,
 } from 'react';
 import { ArchitectureNode } from '../../types/tree';
 import { LoraAdapterMap } from '../../types/lora';
-import { AlignedComponent, PROTOCOL_VERSION } from '../../types/messages';
+import { AlignedComponent, TensorDiffMetrics, PROTOCOL_VERSION } from '../../types/messages';
 import { Toolbar } from './Toolbar';
 import { DetailPanel } from './DetailPanel';
 import { ContextMenu, ContextMenuState } from './ContextMenu';
 import { RenameModal } from './RenameModal';
-import { postMessageToExtension } from '../hooks/useMessage';
+import { postMessageToExtension, useMessage } from '../hooks/useMessage';
+
+/** Context carrying live (on-demand) diff metrics by canonical tensor path. */
+const LiveMetricsContext = React.createContext<Record<string, TensorDiffMetrics>>({});
 
 export interface SequentialViewProps {
   tree: ArchitectureNode;
   loraMap: LoraAdapterMap;
+  filePathA?: string;
   comparison?: {
     treeB: ArchitectureNode;
     loraMapB: LoraAdapterMap;
     alignedComponents: AlignedComponent[];
+    filePathB: string;
   };
   onLoadStats?: (node: ArchitectureNode) => void;
+}
+
+/** Returns the directory portion of a file path (works on both / and \ separators). */
+function dirName(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/');
+  const idx = normalized.lastIndexOf('/');
+  return idx >= 0 ? normalized.slice(0, idx) : filePath;
 }
 
 interface BlockCallbacks {
@@ -31,25 +44,34 @@ interface BlockCallbacks {
   onHoverPath: (path: string | null) => void;
 }
 
-function getComparisonColor(path: string, alignedComponents: AlignedComponent[] | undefined): string | null {
+function cosineSimilarityToColor(cs: number): string {
+  if (cs > 0.999) return '#28a745';  // green — effectively identical
+  if (cs > 0.90) return '#ffc107';   // yellow — moderate drift
+  return '#dc3545';                   // red — significant change
+}
+
+function getComparisonColor(
+  path: string,
+  alignedComponents: AlignedComponent[] | undefined,
+  liveMetrics: Record<string, TensorDiffMetrics>,
+): string | null {
   if (!alignedComponents) return null;
   const canonical = path.replace(/^base_model\.model\./, '');
   const entry = alignedComponents.find((c) => c.path === canonical);
   if (!entry) return '#6c757d';
 
-  if (entry.status === 'onlyA' || entry.status === 'onlyB') return '#dc3545'; // red — absent
-  if (entry.shapeMismatch) return '#ffc107'; // yellow — structural mismatch
+  if (entry.status === 'onlyA' || entry.status === 'onlyB') return '#dc3545';
+  if (entry.shapeMismatch) return '#ffc107';
 
-  // Use actual cosine similarity when available
-  if (entry.diffMetrics) {
-    const cs = entry.diffMetrics.cosineSimilarity;
-    if (cs > 0.999) return '#28a745'; // green — effectively identical
-    if (cs > 0.90) return '#ffc107';  // yellow — moderate drift
-    return '#dc3545';                  // red — significant change (trained weights)
-  }
+  // Live on-demand metrics take priority
+  const live = liveMetrics[canonical];
+  if (live) return cosineSimilarityToColor(live.cosineSimilarity);
 
-  // Fallback for large tensors where diff was skipped
-  return '#28a745';
+  // Pre-computed (initial pass, only for small tensors)
+  if (entry.diffMetrics) return cosineSimilarityToColor(entry.diffMetrics.cosineSimilarity);
+
+  // No weight data yet — show neutral gray, never assume identical
+  return '#6c757d';
 }
 
 function getAlignedStatus(path: string, alignedComponents: AlignedComponent[] | undefined): AlignedComponent | undefined {
@@ -152,10 +174,11 @@ function SequentialBlock({
       (!matchesDtype && node.type === 'parameter') ||
       !matchesLora);
 
+  const liveMetrics = useContext(LiveMetricsContext);
   const comparisonStatus = alignedComponents ? getAlignedStatus(node.fullPath, alignedComponents) : undefined;
   const comparisonColor =
     alignedComponents && (isHovered || isMatchHighlighted)
-      ? getComparisonColor(node.fullPath, alignedComponents)
+      ? getComparisonColor(node.fullPath, alignedComponents, liveMetrics)
       : null;
 
   const typeColor = TYPE_COLORS[node.type] ?? TYPE_COLORS.component;
@@ -366,6 +389,7 @@ function FlowArrow() {
 
 interface ModelColumnProps {
   label: string;
+  folderPath?: string;
   tree: ArchitectureNode;
   loraMap: LoraAdapterMap;
   modelId: 'A' | 'B';
@@ -383,6 +407,7 @@ interface ModelColumnProps {
 
 function ModelColumn({
   label,
+  folderPath,
   tree,
   loraMap,
   modelId,
@@ -401,17 +426,33 @@ function ModelColumn({
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div
         style={{
-          padding: '6px 12px',
-          fontSize: 11,
-          fontWeight: 600,
-          color: 'var(--vscode-descriptionForeground)',
+          padding: '6px 12px 5px',
           borderBottom: '1px solid var(--vscode-panel-border)',
-          letterSpacing: '0.05em',
-          textTransform: 'uppercase',
           flexShrink: 0,
         }}
       >
-        {label}
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--vscode-descriptionForeground)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+          {label}
+        </div>
+        {folderPath && (
+          <div
+            title={folderPath}
+            style={{
+              fontSize: 10,
+              color: 'var(--vscode-descriptionForeground)',
+              opacity: 0.75,
+              fontFamily: 'var(--vscode-editor-font-family, monospace)',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              marginTop: 2,
+              direction: 'rtl',
+              textAlign: 'left',
+            }}
+          >
+            {folderPath}
+          </div>
+        )}
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0 8px 12px' }}>
         {tree.children.map((child, i) => (
@@ -445,6 +486,8 @@ interface ComparisonLayoutProps {
   treeB: ArchitectureNode;
   loraMapA: LoraAdapterMap;
   loraMapB: LoraAdapterMap;
+  folderPathA?: string;
+  folderPathB?: string;
   expandedPaths: Set<string>;
   callbacks: BlockCallbacks;
   searchQuery: string;
@@ -459,6 +502,8 @@ function ComparisonLayout({
   treeB,
   loraMapA,
   loraMapB,
+  folderPathA,
+  folderPathB,
   expandedPaths,
   callbacks,
   searchQuery,
@@ -535,6 +580,7 @@ function ComparisonLayout({
     <div ref={containerRef} style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
       <ModelColumn
         label="Model A"
+        folderPath={folderPathA}
         tree={treeA}
         loraMap={loraMapA}
         modelId="A"
@@ -552,6 +598,7 @@ function ComparisonLayout({
       <div style={{ width: 1, flexShrink: 0, backgroundColor: 'var(--vscode-panel-border)' }} />
       <ModelColumn
         label="Model B"
+        folderPath={folderPathB}
         tree={treeB}
         loraMap={loraMapB}
         modelId="B"
@@ -596,7 +643,19 @@ function ComparisonLayout({
   );
 }
 
-export function SequentialView({ tree, loraMap, comparison, onLoadStats }: SequentialViewProps) {
+/** Collect canonical paths of all leaf (parameter) nodes in a subtree. */
+function collectLeafPaths(node: ArchitectureNode): string[] {
+  if (node.type === 'parameter') {
+    return [node.fullPath.replace(/^base_model\.model\./, '')];
+  }
+  const paths: string[] = [];
+  for (const child of node.children) {
+    paths.push(...collectLeafPaths(child));
+  }
+  return paths;
+}
+
+export function SequentialView({ tree, loraMap, filePathA, comparison, onLoadStats }: SequentialViewProps) {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<'highlight' | 'isolate'>('highlight');
@@ -606,11 +665,40 @@ export function SequentialView({ tree, loraMap, comparison, onLoadStats }: Seque
     node: ArchitectureNode;
     modelId: 'A' | 'B';
     comparisonStatus?: AlignedComponent;
-    diffMetrics?: import('../../types/messages').TensorDiffMetrics;
     loraAdapters: unknown[];
   } | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [renameTarget, setRenameTarget] = useState<ArchitectureNode | null>(null);
+
+  // ── Live on-demand diff state ────────────────────────────────────────────────
+  const [liveMetrics, setLiveMetrics] = useState<Record<string, TensorDiffMetrics>>({});
+  const [livePreviews, setLivePreviews] = useState<Record<string, { valuesA: number[]; valuesB: number[]; shape: number[]; error?: string }>>({});
+  const [loadingDiffPath, setLoadingDiffPath] = useState<string | null>(null);
+  const [liveModuleDiffs, setLiveModuleDiffs] = useState<Array<{ path: string; metrics: TensorDiffMetrics | null; error?: string }> | null>(null);
+  const [loadingModuleDiff, setLoadingModuleDiff] = useState(false);
+
+  useMessage({
+    tensorDiffResult: (msg) => {
+      setLoadingDiffPath((prev) => (prev === msg.path ? null : prev));
+      if (msg.metrics) {
+        setLiveMetrics((prev) => ({ ...prev, [msg.path]: msg.metrics! }));
+      }
+      // Always store preview (even if empty — holds error info)
+      setLivePreviews((prev) => ({
+        ...prev,
+        [msg.path]: {
+          valuesA: msg.previewA,
+          valuesB: msg.previewB,
+          shape: msg.shape,
+          error: msg.error,
+        },
+      }));
+    },
+    moduleDiffResult: (msg) => {
+      setLoadingModuleDiff(false);
+      setLiveModuleDiffs(msg.results);
+    },
+  });
 
   const handleExpandAll = useCallback(() => {
     const all = new Set<string>();
@@ -645,10 +733,32 @@ export function SequentialView({ tree, loraMap, comparison, onLoadStats }: Seque
       const loraAdapters = node.adapters
         ? Object.values(node.adapters)
         : currentLoraMap[node.fullPath] ?? [];
-      setSelectedNodeData({ node, modelId, comparisonStatus, diffMetrics: comparisonStatus?.diffMetrics, loraAdapters });
+      setSelectedNodeData({ node, modelId, comparisonStatus, loraAdapters });
+      // Reset module diff results whenever the selection changes
+      setLiveModuleDiffs(null);
+
+      // Auto-trigger on-demand diff for matched parameter tensors in comparison mode
+      if (
+        comparison &&
+        node.type === 'parameter' &&
+        comparisonStatus?.status === 'matched' &&
+        !comparisonStatus?.shapeMismatch
+      ) {
+        setLoadingDiffPath(canonical);
+        postMessageToExtension({ type: 'requestTensorDiff', protocolVersion: PROTOCOL_VERSION, path: canonical });
+      }
     },
     [loraMap, comparison],
   );
+
+  const handleRequestModuleDiff = useCallback(() => {
+    if (!selectedNodeData || !comparison) return;
+    const paths = collectLeafPaths(selectedNodeData.node);
+    if (paths.length === 0) return;
+    setLoadingModuleDiff(true);
+    setLiveModuleDiffs(null);
+    postMessageToExtension({ type: 'requestModuleDiff', protocolVersion: PROTOCOL_VERSION, paths });
+  }, [selectedNodeData, comparison]);
 
   const handleContextMenuOpen = useCallback(
     (e: React.MouseEvent, node: ArchitectureNode, modelId: 'A' | 'B') => {
@@ -710,16 +820,29 @@ export function SequentialView({ tree, loraMap, comparison, onLoadStats }: Seque
 
   const detailPanelData = useMemo(() => {
     if (!selectedNodeData) return null;
+    const canonical = selectedNodeData.node.fullPath.replace(/^base_model\.model\./, '');
+    const activeLiveMetrics = liveMetrics[canonical] ?? null;
+    const activePreview = livePreviews[canonical] ?? null;
+    // Live metrics override pre-computed ones from the initial pass
+    const diffMetrics = activeLiveMetrics ?? selectedNodeData.comparisonStatus?.diffMetrics ?? null;
     return {
       node: selectedNodeData.node,
       modelId: selectedNodeData.modelId,
       comparisonStatus: selectedNodeData.comparisonStatus,
-      diffMetrics: selectedNodeData.diffMetrics,
+      diffMetrics,
+      livePreview: activePreview,
+      isLoadingDiff: loadingDiffPath === canonical,
       loraAdapters: selectedNodeData.loraAdapters,
+      moduleDiffs: liveModuleDiffs,
+      isLoadingModuleDiff: loadingModuleDiff,
+      onRequestModuleDiff: handleRequestModuleDiff,
+      hasComparison: !!comparison,
+      leafTensorCount: collectLeafPaths(selectedNodeData.node).length,
     };
-  }, [selectedNodeData]);
+  }, [selectedNodeData, liveMetrics, livePreviews, loadingDiffPath, liveModuleDiffs, loadingModuleDiff, comparison, handleRequestModuleDiff]);
 
   return (
+    <LiveMetricsContext.Provider value={liveMetrics}>
     <div
       style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden' }}
       onClick={() => contextMenu && setContextMenu(null)}
@@ -745,6 +868,8 @@ export function SequentialView({ tree, loraMap, comparison, onLoadStats }: Seque
               treeB={comparison.treeB}
               loraMapA={loraMap}
               loraMapB={comparison.loraMapB}
+              folderPathA={filePathA ? dirName(filePathA) : undefined}
+              folderPathB={dirName(comparison.filePathB)}
               expandedPaths={expandedPaths}
               callbacks={callbacks}
               searchQuery={searchQuery}
@@ -754,7 +879,28 @@ export function SequentialView({ tree, loraMap, comparison, onLoadStats }: Seque
               alignedComponents={comparison.alignedComponents}
             />
           ) : (
-            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0 8px 12px' }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {filePathA && (
+                <div style={{ padding: '6px 12px 5px', borderBottom: '1px solid var(--vscode-panel-border)', flexShrink: 0 }}>
+                  <div
+                    title={dirName(filePathA)}
+                    style={{
+                      fontSize: 10,
+                      color: 'var(--vscode-descriptionForeground)',
+                      opacity: 0.75,
+                      fontFamily: 'var(--vscode-editor-font-family, monospace)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      direction: 'rtl',
+                      textAlign: 'left',
+                    }}
+                  >
+                    {dirName(filePathA)}
+                  </div>
+                </div>
+              )}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0 8px 12px' }}>
               {tree.children.map((child, i) => (
                 <React.Fragment key={child.fullPath}>
                   {i > 0 && <FlowArrow />}
@@ -773,6 +919,7 @@ export function SequentialView({ tree, loraMap, comparison, onLoadStats }: Seque
                   />
                 </React.Fragment>
               ))}
+            </div>
             </div>
           )}
         </div>
@@ -804,5 +951,6 @@ export function SequentialView({ tree, loraMap, comparison, onLoadStats }: Seque
         />
       )}
     </div>
+    </LiveMetricsContext.Provider>
   );
 }

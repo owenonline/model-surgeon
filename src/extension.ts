@@ -5,7 +5,7 @@ import { loadShardedModel, isShardedModel } from './parsers/shardedModel';
 import { detectLoraAdapters, parseAdapterConfig } from './parsers/loraDetector';
 import { buildArchitectureTree } from './parsers/treeBuilder';
 import { alignArchitectures } from './parsers/alignment';
-import { computeTensorDiffs } from './parsers/tensorDiff';
+import { computeTensorDiffs, readSingleTensorAsFloat32, computeDiffMetrics } from './parsers/tensorDiff';
 import { WorkerPool } from './workers/workerPool';
 import { MessageHost } from './protocol/messageHost';
 import { PROTOCOL_VERSION } from './types/messages';
@@ -128,6 +128,86 @@ function setupMessageHandlers(messageHost: MessageHost, _context: vscode.Extensi
     if (currentModelA) {
       await loadAndCompareModel(msg.filePath, messageHost);
     }
+  });
+
+  // ── On-demand tensor diff ──────────────────────────────────────────────────
+  messageHost.onMessage('requestTensorDiff', async (msg) => {
+    const { path: tensorPath } = msg;
+    try {
+      if (!currentModelA || !currentModelB) {
+        throw new Error('Both models must be loaded to compute a diff');
+      }
+      const [floatsA, floatsB] = await Promise.all([
+        readSingleTensorAsFloat32(currentModelA.tensors, currentModelA.shardHeaderLengths, tensorPath),
+        readSingleTensorAsFloat32(currentModelB.tensors, currentModelB.shardHeaderLengths, tensorPath),
+      ]);
+      if (!floatsA || !floatsB) {
+        throw new Error(
+          `Tensor "${tensorPath}" not found in ${!floatsA ? 'Model A' : 'Model B'}. ` +
+          `Model A has ${Object.keys(currentModelA.tensors).length} tensors, ` +
+          `Model B has ${Object.keys(currentModelB.tensors).length} tensors.`,
+        );
+      }
+      const metrics = computeDiffMetrics(floatsA, floatsB);
+      const PREVIEW_N = 20;
+      const infoA = currentModelA.tensors[tensorPath];
+      messageHost.postMessage({
+        type: 'tensorDiffResult',
+        protocolVersion: PROTOCOL_VERSION,
+        path: tensorPath,
+        metrics,
+        previewA: Array.from(floatsA.slice(0, PREVIEW_N)),
+        previewB: Array.from(floatsB.slice(0, PREVIEW_N)),
+        shape: infoA?.shape ?? [],
+      });
+    } catch (err) {
+      messageHost.postMessage({
+        type: 'tensorDiffResult',
+        protocolVersion: PROTOCOL_VERSION,
+        path: tensorPath,
+        metrics: null,
+        previewA: [],
+        previewB: [],
+        shape: [],
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  // ── On-demand module diff (batch) ──────────────────────────────────────────
+  messageHost.onMessage('requestModuleDiff', async (msg) => {
+    const { paths } = msg;
+    if (!currentModelA || !currentModelB) {
+      messageHost.postMessage({
+        type: 'moduleDiffResult',
+        protocolVersion: PROTOCOL_VERSION,
+        results: paths.map((p) => ({ path: p, metrics: null, error: 'Models not loaded' })),
+      });
+      return;
+    }
+    const modelA = currentModelA;
+    const modelB = currentModelB;
+    const results = await Promise.all(
+      paths.map(async (tensorPath) => {
+        try {
+          const [floatsA, floatsB] = await Promise.all([
+            readSingleTensorAsFloat32(modelA.tensors, modelA.shardHeaderLengths, tensorPath),
+            readSingleTensorAsFloat32(modelB.tensors, modelB.shardHeaderLengths, tensorPath),
+          ]);
+          if (!floatsA || !floatsB) {
+            return { path: tensorPath, metrics: null as null, error: 'Tensor not found in one or both models' };
+          }
+          return { path: tensorPath, metrics: computeDiffMetrics(floatsA, floatsB) };
+        } catch (err) {
+          return { path: tensorPath, metrics: null as null, error: err instanceof Error ? err.message : String(err) };
+        }
+      }),
+    );
+    messageHost.postMessage({
+      type: 'moduleDiffResult',
+      protocolVersion: PROTOCOL_VERSION,
+      results,
+    });
   });
 
   messageHost.onMessage('performSurgery', async (msg) => {

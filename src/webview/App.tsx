@@ -7,10 +7,12 @@ import { SequentialView } from './components/SequentialView';
 export function App() {
   const [tree, setTree] = useState<ArchitectureNode | null>(null);
   const [loraMap, setLoraMap] = useState<LoraAdapterMap>({});
+  const [filePathA, setFilePathA] = useState<string | null>(null);
   const [comparison, setComparison] = useState<{
     treeB: ArchitectureNode;
     loraMapB: LoraAdapterMap;
     alignedComponents: import('../types/messages').AlignedComponent[];
+    filePathB: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -20,6 +22,7 @@ export function App() {
     modelLoaded: (msg) => {
       setTree(msg.tree);
       setLoraMap(msg.loraMap);
+      setFilePathA(msg.filePath);
       setLoading(false);
       setProgress(null);
       setError(null);
@@ -35,7 +38,8 @@ export function App() {
       setComparison({
         treeB: msg.treeB,
         loraMapB: msg.loraMapB,
-        alignedComponents: msg.alignedComponents
+        alignedComponents: msg.alignedComponents,
+        filePathB: msg.filePathB,
       });
       setLoading(false);
       setProgress(null);
@@ -94,7 +98,13 @@ export function App() {
   if (tree) {
     return (
       <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0 }}>
-        <SequentialView tree={tree} loraMap={loraMap} comparison={comparison || undefined} onLoadStats={handleLoadStats} />
+        <SequentialView
+          tree={tree}
+          loraMap={loraMap}
+          filePathA={filePathA || undefined}
+          comparison={comparison || undefined}
+          onLoadStats={handleLoadStats}
+        />
       </div>
     );
   }

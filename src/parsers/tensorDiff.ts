@@ -172,6 +172,33 @@ function computeMetrics(a: Float32Array, b: Float32Array): TensorDiffMetrics {
   };
 }
 
+/**
+ * Read a single tensor and return it as Float32Array.
+ * Returns null if the path is not found in the tensor map.
+ */
+export async function readSingleTensorAsFloat32(
+  tensors: Record<string, ShardedTensorInfo>,
+  headerLengths: Record<string, number>,
+  path: string,
+): Promise<Float32Array | null> {
+  const info = tensors[path];
+  if (!info) return null;
+  const headerLen = headerLengths[info.shardFile] ?? 0;
+  const byteStart = 8 + headerLen + info.dataOffsets[0];
+  const byteLen = info.dataOffsets[1] - info.dataOffsets[0];
+  const buf = Buffer.alloc(byteLen);
+  const fd = await fs.promises.open(info.shardFile, 'r');
+  try {
+    await fd.read(buf, 0, byteLen, byteStart);
+    return bufferToFloat32(buf, info.dtype);
+  } finally {
+    await fd.close();
+  }
+}
+
+/** Public alias so callers outside this file can compute metrics. */
+export { computeMetrics as computeDiffMetrics };
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 function tensorElementCount(info: ShardedTensorInfo): number {
