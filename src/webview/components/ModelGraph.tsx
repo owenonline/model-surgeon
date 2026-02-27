@@ -19,6 +19,10 @@ import { buildGraph } from '../utils/graph';
 import { CustomNode } from './CustomNode';
 import { Toolbar } from './Toolbar';
 import { DetailPanel } from './DetailPanel';
+import { ContextMenu, ContextMenuState } from './ContextMenu';
+import { RenameModal } from './RenameModal';
+import { postMessageToExtension } from '../hooks/useMessage';
+import { PROTOCOL_VERSION } from '../../types/messages';
 
 const nodeTypes: NodeTypes = {
   customNode: CustomNode,
@@ -42,6 +46,9 @@ function ModelGraphInner({ tree, loraMap, comparison, onLoadStats }: ModelGraphP
   const [filterDtype, setFilterDtype] = useState('all');
   const [filterLora, setFilterLora] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [renameTarget, setRenameTarget] = useState<ArchitectureNode | null>(null);
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -80,6 +87,84 @@ function ModelGraphInner({ tree, loraMap, comparison, onLoadStats }: ModelGraphP
 
   const handleNodeClick: NodeMouseHandler = useCallback((event, node) => {
     setSelectedNodeId(node.id);
+    setContextMenu(null);
+  }, []);
+
+  // Right-click: show custom context menu, block VS Code/browser context menu
+  const handleNodeContextMenu: NodeMouseHandler = useCallback((event, node) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const archNode = node.data?.node as ArchitectureNode | undefined;
+    const modelId = (node.data?.modelId as 'A' | 'B') ?? 'A';
+    const hasLora = (node.data?.hasLora as boolean) ?? false;
+    if (!archNode) return;
+    setContextMenu({
+      x: (event as unknown as MouseEvent).clientX,
+      y: (event as unknown as MouseEvent).clientY,
+      node: archNode,
+      modelId,
+      hasLora,
+      hasComparison: !!comparison,
+    });
+  }, [comparison]);
+
+  // Prevent the canvas context menu too (panning background right-click)
+  const handlePaneContextMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    setContextMenu(null);
+  }, []);
+
+  // Surgery actions
+  const handleRename = useCallback((node: ArchitectureNode) => {
+    setRenameTarget(node);
+  }, []);
+
+  const handleRenameConfirm = useCallback((newName: string) => {
+    if (!renameTarget) return;
+    postMessageToExtension({
+      type: 'performSurgery',
+      protocolVersion: PROTOCOL_VERSION,
+      operation: {
+        operationType: 'renameTensor',
+        targetPath: renameTarget.fullPath,
+        newName,
+      },
+    });
+    setRenameTarget(null);
+  }, [renameTarget]);
+
+  const handleRemove = useCallback((node: ArchitectureNode) => {
+    postMessageToExtension({
+      type: 'performSurgery',
+      protocolVersion: PROTOCOL_VERSION,
+      operation: {
+        operationType: 'removeTensor',
+        targetPath: node.fullPath,
+      },
+    });
+  }, []);
+
+  const handleRemoveLora = useCallback((node: ArchitectureNode) => {
+    postMessageToExtension({
+      type: 'performSurgery',
+      protocolVersion: PROTOCOL_VERSION,
+      operation: {
+        operationType: 'removeLoraAdapter',
+        targetPath: node.fullPath,
+      },
+    });
+  }, []);
+
+  const handleReplaceFromB = useCallback((node: ArchitectureNode) => {
+    postMessageToExtension({
+      type: 'performSurgery',
+      protocolVersion: PROTOCOL_VERSION,
+      operation: {
+        operationType: 'replaceTensor',
+        targetPath: node.fullPath,
+        sourceModel: 'B',
+      },
+    });
   }, []);
 
   useEffect(() => {
@@ -98,7 +183,6 @@ function ModelGraphInner({ tree, loraMap, comparison, onLoadStats }: ModelGraphP
     requestAnimationFrame(() => fitView({ duration: 300 }));
   }, [tree, loraMap, expandedNodes, searchQuery, filterDtype, filterLora, filterMode, comparison, setNodes, setEdges, fitView]);
 
-  // Find selected node details
   const selectedNodeData = useMemo(() => {
     if (!selectedNodeId) return null;
     const n = nodes.find(n => n.id === selectedNodeId);
@@ -130,6 +214,8 @@ function ModelGraphInner({ tree, loraMap, comparison, onLoadStats }: ModelGraphP
             nodeTypes={nodeTypes}
             onNodeDoubleClick={handleNodeDoubleClick}
             onNodeClick={handleNodeClick}
+            onNodeContextMenu={handleNodeContextMenu}
+            onPaneContextMenu={handlePaneContextMenu}
             fitView
             fitViewOptions={{ padding: 0.2 }}
             panOnDrag
@@ -166,6 +252,27 @@ function ModelGraphInner({ tree, loraMap, comparison, onLoadStats }: ModelGraphP
           />
         )}
       </div>
+
+      {/* Custom right-click context menu */}
+      {contextMenu && (
+        <ContextMenu
+          {...contextMenu}
+          onClose={() => setContextMenu(null)}
+          onRename={handleRename}
+          onRemove={handleRemove}
+          onRemoveLora={handleRemoveLora}
+          onReplaceFromB={handleReplaceFromB}
+        />
+      )}
+
+      {/* Rename modal */}
+      {renameTarget && (
+        <RenameModal
+          node={renameTarget}
+          onConfirm={handleRenameConfirm}
+          onCancel={() => setRenameTarget(null)}
+        />
+      )}
     </div>
   );
 }

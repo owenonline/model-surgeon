@@ -17,6 +17,9 @@ let currentPanel: vscode.WebviewPanel | undefined;
 let currentMessageHost: MessageHost | undefined;
 let currentSurgerySession: SurgerySession | undefined;
 
+// URI stored by "Select for Model Surgeon Compare"
+let selectedForCompareUri: vscode.Uri | undefined;
+
 let currentModelA: {
   filePath: string;
   tree: import('./types/tree').ArchitectureNode;
@@ -29,72 +32,57 @@ let currentModelB: {
   shardHeaderLengths: Record<string, number>;
 } | undefined;
 
-export function activate(context: vscode.ExtensionContext) {
-  Logger.initialize();
-  Logger.log('Model Surgeon activated', 'Lifecycle');
-  
-  workerPool = new WorkerPool(2);
+// ─── Custom Editor Provider ───────────────────────────────────────────────────
 
-  const openModelCmd = vscode.commands.registerCommand(
-    'modelSurgeon.openModel',
-    async () => {
-      const uris = await vscode.window.showOpenDialog({
-        canSelectMany: false,
-        filters: {
-          'Safetensors': ['safetensors'],
-          'Index JSON': ['json'],
-        },
-        title: 'Open Safetensors Model',
-      });
+class SafetensorsEditorProvider implements vscode.CustomReadonlyEditorProvider {
+  constructor(private readonly context: vscode.ExtensionContext) {}
 
-      if (!uris || uris.length === 0) return;
-      await openModel(uris[0].fsPath, context);
-    },
-  );
+  openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
+    return { uri, dispose: () => {} };
+  }
 
-  const openComparisonCmd = vscode.commands.registerCommand(
-    'modelSurgeon.openComparison',
-    async () => {
-      if (!currentPanel) {
-        vscode.window.showErrorMessage('Open a model first before comparing.');
-        return;
+  async resolveCustomEditor(
+    document: vscode.CustomDocument,
+    webviewPanel: vscode.WebviewPanel,
+    _token: vscode.CancellationToken,
+  ): Promise<void> {
+    webviewPanel.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [
+        vscode.Uri.file(path.join(this.context.extensionPath, 'dist', 'webview')),
+      ],
+    };
+
+    // Tear down any existing panel state cleanly
+    currentMessageHost?.dispose();
+
+    currentPanel = webviewPanel;
+    const messageHost = new MessageHost();
+    setupMessageHandlers(messageHost, this.context);
+    messageHost.attach(webviewPanel);
+    currentMessageHost = messageHost;
+
+    webviewPanel.webview.html = getWebviewContent(webviewPanel.webview, this.context);
+
+    webviewPanel.onDidDispose(() => {
+      if (currentPanel === webviewPanel) {
+        currentPanel = undefined;
+        currentMessageHost = undefined;
+        currentModelA = undefined;
       }
+      messageHost.dispose();
+    });
 
-      const uris = await vscode.window.showOpenDialog({
-        canSelectMany: false,
-        filters: {
-          'Safetensors': ['safetensors'],
-          'Index JSON': ['json'],
-        },
-        title: 'Open Second Model for Comparison',
-      });
-
-      if (!uris || uris.length === 0) return;
-      if (currentMessageHost && currentModelA) {
-        await loadAndCompareModel(uris[0].fsPath, currentMessageHost);
-      } else {
-        vscode.window.showErrorMessage('Model A is not fully loaded yet.');
-      }
-    },
-  );
-
-  const saveSurgeryCmd = vscode.commands.registerCommand(
-    'modelSurgeon.saveSurgeryResult',
-    async () => {
-      vscode.window.showInformationMessage('Surgery save not yet implemented.');
-    },
-  );
-
-  context.subscriptions.push(openModelCmd, openComparisonCmd, saveSurgeryCmd);
-
-  // Activate on .safetensors file open
-  vscode.workspace.onDidOpenTextDocument((doc) => {
-    if (doc.fileName.endsWith('.safetensors')) {
-      openModel(doc.fileName, context);
-    }
-  });
+    await loadAndSendModel(document.uri.fsPath, messageHost);
+  }
 }
 
+// ─── Shared panel setup helpers ───────────────────────────────────────────────
+
+/**
+ * Create or reuse the Model Surgeon webview panel for non-custom-editor usage
+ * (e.g. the command palette "Open Model" command or opening an index.json).
+ */
 async function openModel(filePath: string, context: vscode.ExtensionContext) {
   const messageHost = new MessageHost();
 
@@ -120,17 +108,24 @@ async function openModel(filePath: string, context: vscode.ExtensionContext) {
     });
   }
 
+  currentMessageHost?.dispose();
   currentPanel.webview.html = getWebviewContent(currentPanel.webview, context);
+  setupMessageHandlers(messageHost, context);
   messageHost.attach(currentPanel);
   currentMessageHost = messageHost;
 
-  // Register handlers for incoming messages
+  await loadAndSendModel(filePath, messageHost);
+}
+
+function setupMessageHandlers(messageHost: MessageHost, _context: vscode.ExtensionContext) {
   messageHost.onMessage('loadModel', async (msg) => {
     await loadAndSendModel(msg.filePath, messageHost);
   });
 
   messageHost.onMessage('loadComparison', async (msg) => {
-    await loadAndCompareModel(msg.filePath, messageHost);
+    if (currentModelA) {
+      await loadAndCompareModel(msg.filePath, messageHost);
+    }
   });
 
   messageHost.onMessage('performSurgery', async (msg) => {
@@ -163,9 +158,9 @@ async function openModel(filePath: string, context: vscode.ExtensionContext) {
           break;
         case 'replaceTensor':
           if (op.sourceModel === 'B' && currentModelB) {
-             currentSurgerySession.replaceComponent(op.targetPath, currentModelB.tensors, currentModelB.shardHeaderLengths);
+            currentSurgerySession.replaceComponent(op.targetPath, currentModelB.tensors, currentModelB.shardHeaderLengths);
           } else {
-             throw new Error('Source model B not available');
+            throw new Error('Source model B not available');
           }
           break;
         default:
@@ -173,9 +168,7 @@ async function openModel(filePath: string, context: vscode.ExtensionContext) {
       }
 
       const currentState = currentSurgerySession.getCurrentState();
-      // Need to re-build tree and lora map to send back
-      // Since surgery might change adapters, we should re-detect
-      const newLoraMap = detectLoraAdapters(currentState.tensors, {}); // we don't carry full adapter config for now or it's unchanged?
+      const newLoraMap = detectLoraAdapters(currentState.tensors, null);
       const newTree = buildArchitectureTree(currentState.tensors, newLoraMap);
 
       messageHost.postMessage({
@@ -194,9 +187,133 @@ async function openModel(filePath: string, context: vscode.ExtensionContext) {
       });
     }
   });
-
-  await loadAndSendModel(filePath, messageHost);
 }
+
+// ─── activate ─────────────────────────────────────────────────────────────────
+
+export function activate(context: vscode.ExtensionContext) {
+  Logger.initialize();
+  Logger.log('Model Surgeon activated', 'Lifecycle');
+
+  workerPool = new WorkerPool(2);
+
+  // Register Custom Editor Provider for .safetensors files
+  const editorProvider = new SafetensorsEditorProvider(context);
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(
+      'modelSurgeon.safetensorsEditor',
+      editorProvider,
+      {
+        webviewOptions: { retainContextWhenHidden: true },
+        supportsMultipleEditorsPerDocument: false,
+      },
+    ),
+  );
+
+  // ── Command: Open Model (file picker) ──────────────────────────────────────
+  const openModelCmd = vscode.commands.registerCommand(
+    'modelSurgeon.openModel',
+    async () => {
+      const uris = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        filters: {
+          'Safetensors / Index': ['safetensors', 'json'],
+        },
+        title: 'Open Safetensors Model',
+      });
+      if (!uris || uris.length === 0) return;
+      await openModel(uris[0].fsPath, context);
+    },
+  );
+
+  // ── Command: Open Model from URI (explorer context menu) ──────────────────
+  const openModelFromUriCmd = vscode.commands.registerCommand(
+    'modelSurgeon.openModelFromUri',
+    async (uri: vscode.Uri) => {
+      if (!uri) return;
+      // .safetensors files are handled by the custom editor, but the user may
+      // invoke this command explicitly to reopen in a non-custom-editor panel.
+      await openModel(uri.fsPath, context);
+    },
+  );
+
+  // ── Command: Open Comparison (file picker) ─────────────────────────────────
+  const openComparisonCmd = vscode.commands.registerCommand(
+    'modelSurgeon.openComparison',
+    async () => {
+      if (!currentPanel) {
+        vscode.window.showErrorMessage('Open a model first before comparing.');
+        return;
+      }
+      const uris = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        filters: { 'Safetensors / Index': ['safetensors', 'json'] },
+        title: 'Open Second Model for Comparison',
+      });
+      if (!uris || uris.length === 0) return;
+      if (currentMessageHost && currentModelA) {
+        await loadAndCompareModel(uris[0].fsPath, currentMessageHost);
+      } else {
+        vscode.window.showErrorMessage('Model A is not fully loaded yet.');
+      }
+    },
+  );
+
+  // ── Command: Save Surgery Result ───────────────────────────────────────────
+  const saveSurgeryCmd = vscode.commands.registerCommand(
+    'modelSurgeon.saveSurgeryResult',
+    async () => {
+      vscode.window.showInformationMessage('Surgery save not yet implemented.');
+    },
+  );
+
+  // ── Command: Select for Model Surgeon Compare ─────────────────────────────
+  const selectForCompareCmd = vscode.commands.registerCommand(
+    'modelSurgeon.selectForCompare',
+    async (uri: vscode.Uri) => {
+      if (!uri) return;
+      selectedForCompareUri = uri;
+      // Set context key so "Compare with Selected" becomes visible
+      vscode.commands.executeCommand('setContext', 'modelSurgeon.hasSelectedForCompare', true);
+      const label = path.basename(uri.fsPath);
+      vscode.window.setStatusBarMessage(`Model Surgeon: selected "${label}" for compare`, 5000);
+    },
+  );
+
+  // ── Command: Compare with Selected ────────────────────────────────────────
+  const compareWithSelectedCmd = vscode.commands.registerCommand(
+    'modelSurgeon.compareWithSelected',
+    async (uri: vscode.Uri) => {
+      if (!uri || !selectedForCompareUri) return;
+
+      const targetPath = uri.fsPath;
+      const selectedPath = selectedForCompareUri.fsPath;
+
+      // Decide which model is A and which is B.
+      // Convention: the one right-clicked is primary (Model A); selected is compared (Model B).
+      // If the right-clicked file isn't already loaded as Model A, load it first.
+      // Both calls are sequential so Model A will be ready before comparison starts.
+      if (!currentModelA || currentModelA.filePath !== targetPath) {
+        await openModel(targetPath, context);
+      }
+
+      if (currentMessageHost && currentModelA) {
+        await loadAndCompareModel(selectedPath, currentMessageHost);
+      }
+    },
+  );
+
+  context.subscriptions.push(
+    openModelCmd,
+    openModelFromUriCmd,
+    openComparisonCmd,
+    saveSurgeryCmd,
+    selectForCompareCmd,
+    compareWithSelectedCmd,
+  );
+}
+
+// ─── Model loading ────────────────────────────────────────────────────────────
 
 async function loadAndSendModel(filePath: string, messageHost: MessageHost) {
   try {
@@ -274,9 +391,7 @@ async function loadAndSendModel(filePath: string, messageHost: MessageHost) {
 }
 
 async function loadAndCompareModel(filePath: string, messageHost: MessageHost) {
-  if (!currentModelA) {
-    return;
-  }
+  if (!currentModelA) return;
 
   try {
     messageHost.postMessage({
@@ -302,7 +417,7 @@ async function loadAndCompareModel(filePath: string, messageHost: MessageHost) {
       );
       shardHeaderLengths = { [filePath]: header.headerLength };
     }
-    
+
     currentModelB = { tensors, shardHeaderLengths };
 
     messageHost.postMessage({
@@ -347,6 +462,8 @@ async function loadAndCompareModel(filePath: string, messageHost: MessageHost) {
     });
   }
 }
+
+// ─── Webview HTML ─────────────────────────────────────────────────────────────
 
 function getWebviewContent(webview: vscode.Webview, context: vscode.ExtensionContext): string {
   const scriptUri = webview.asWebviewUri(

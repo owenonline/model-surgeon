@@ -178,13 +178,30 @@ export function Toolbar({
             <li><kbd>Ctrl/Cmd + Shift + Z</kbd> - Redo surgery</li>
           </ul>
 
+          <h3 style={{ fontSize: '14px', marginBottom: '4px' }}>Node Types</h3>
+          <ul style={{ margin: '0 0 16px 0', paddingLeft: '0', fontSize: '13px', listStyle: 'none' }}>
+            {[
+              { color: '#4fc1ff', label: 'Block', desc: 'Numbered layers (e.g. layers.0, h.3)' },
+              { color: '#c586c0', label: 'Component', desc: 'Named submodules (e.g. self_attn, mlp)' },
+              { color: '#aaaaaa', label: 'Parameter', desc: 'Leaf tensors (weight, bias, etc.)' },
+            ].map(({ color, label, desc }) => (
+              <li key={label} style={{ marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{
+                  display: 'inline-block', width: '4px', height: '20px',
+                  backgroundColor: color, borderRadius: '2px', flexShrink: 0,
+                }} />
+                <span><strong>{label}</strong> — {desc}</span>
+              </li>
+            ))}
+          </ul>
+
           <h3 style={{ fontSize: '14px', marginBottom: '4px' }}>Node Colors & Indicators</h3>
           <ul style={{ margin: '0 0 16px 0', paddingLeft: '20px', fontSize: '13px', listStyle: 'none' }}>
-            <li style={{ marginBottom: '4px' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', borderRadius: '50%', backgroundColor: 'var(--vscode-testing-iconPassed, #89d185)', marginRight: '8px' }}></span>Node has LoRA adapter</li>
-            <li style={{ marginBottom: '4px' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid var(--vscode-testing-iconPassed, #28a745)', marginRight: '8px' }}></span>Comparison: Identical / High similarity</li>
-            <li style={{ marginBottom: '4px' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid var(--vscode-testing-iconQueued, #ffc107)', marginRight: '8px' }}></span>Comparison: Moderate diff</li>
-            <li style={{ marginBottom: '4px' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid var(--vscode-testing-iconFailed, #dc3545)', marginRight: '8px' }}></span>Comparison: High diff</li>
-            <li style={{ marginBottom: '4px' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px dashed var(--vscode-descriptionForeground, #888)', marginRight: '8px' }}></span>Comparison: Absent in other model</li>
+            <li style={{ marginBottom: '4px' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#89d185', marginRight: '8px' }}></span>Node has LoRA adapter (hover to see adapter names)</li>
+            <li style={{ marginBottom: '4px' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid #28a745', marginRight: '8px' }}></span>Comparison: Identical / High similarity</li>
+            <li style={{ marginBottom: '4px' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid #ffc107', marginRight: '8px' }}></span>Comparison: Moderate diff</li>
+            <li style={{ marginBottom: '4px' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid #dc3545', marginRight: '8px' }}></span>Comparison: High diff</li>
+            <li style={{ marginBottom: '4px' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px dashed #888', marginRight: '8px' }}></span>Comparison: Absent in other model</li>
           </ul>
 
           <h3 style={{ fontSize: '14px', marginBottom: '4px' }}>Surgery Workflow</h3>

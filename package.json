@@ -19,14 +19,35 @@
     "visualization"
   ],
   "activationEvents": [
-    "onLanguage:safetensors"
+    "onCustomEditor:modelSurgeon.safetensorsEditor",
+    "onCommand:modelSurgeon.openModel",
+    "onCommand:modelSurgeon.openModelFromUri",
+    "onCommand:modelSurgeon.openComparison",
+    "onCommand:modelSurgeon.saveSurgeryResult",
+    "onCommand:modelSurgeon.selectForCompare",
+    "onCommand:modelSurgeon.compareWithSelected"
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "customEditors": [
+      {
+        "viewType": "modelSurgeon.safetensorsEditor",
+        "displayName": "Model Surgeon",
+        "selector": [
+          { "filenamePattern": "*.safetensors" }
+        ],
+        "priority": "default"
+      }
+    ],
     "commands": [
       {
         "command": "modelSurgeon.openModel",
         "title": "Open Model",
+        "category": "Model Surgeon"
+      },
+      {
+        "command": "modelSurgeon.openModelFromUri",
+        "title": "Open in Model Surgeon",
         "category": "Model Surgeon"
       },
       {
@@ -38,8 +59,37 @@
         "command": "modelSurgeon.saveSurgeryResult",
         "title": "Save Surgery Result",
         "category": "Model Surgeon"
+      },
+      {
+        "command": "modelSurgeon.selectForCompare",
+        "title": "Select for Model Surgeon Compare",
+        "category": "Model Surgeon"
+      },
+      {
+        "command": "modelSurgeon.compareWithSelected",
+        "title": "Model Surgeon: Compare with Selected",
+        "category": "Model Surgeon"
       }
     ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "modelSurgeon.openModelFromUri",
+          "when": "resourceExtname == .safetensors",
+          "group": "modelSurgeon@1"
+        },
+        {
+          "command": "modelSurgeon.selectForCompare",
+          "when": "resourceExtname == .safetensors",
+          "group": "modelSurgeon@2"
+        },
+        {
+          "command": "modelSurgeon.compareWithSelected",
+          "when": "resourceExtname == .safetensors && modelSurgeon.hasSelectedForCompare",
+          "group": "modelSurgeon@3"
+        }
+      ]
+    },
     "languages": [
       {
         "id": "safetensors",
